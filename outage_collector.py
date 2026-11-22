@@ -502,9 +502,10 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
                     start_raw = str(obj.get("start") or obj.get("startDate") or obj.get("start_date") or "")
                     end_raw = str(obj.get("expectedEnd") or obj.get("expected_end") or obj.get("end") or "")
                     desc_raw = str(obj.get("description") or obj.get("summary") or obj.get("title") or f"{status} affecting {services_str or carrier}.")
+                    fallback_id = f"{now_awst.strftime('%m%d')}-{idx:02d}"
 
                     records.append({
-                        "id": f"ABB-{obj.get('id', f'{now_awst.strftime(\"%m%d\")}-{idx:02d}')}",
+                        "id": f"ABB-{obj.get('id', fallback_id)}",
                         "carrier": carrier,
                         "status": status,
                         "state": state_code,
