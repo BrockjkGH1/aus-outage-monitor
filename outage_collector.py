@@ -458,6 +458,10 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
     CVC/POI and Opticomm network events with suburb/POI names and 12h windows.
     """
     records: List[Dict[str, Any]] = []
+    now_awst = datetime.now(ZoneInfo("Australia/Perth"))
+    now_str = now_awst.strftime("%I:%M %p AWST").lstrip("0")
+    current_year = now_awst.year
+
     # Strip Markdown formatting markers (#, *, _, >) and [Link Text](url) wrappers
     raw_lines = strip_html_to_lines(html_text)
     lines = []
@@ -508,15 +512,21 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
             or "opticomm" in ln.lower()
             or re.match(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*\(\d{4}\)$", ln)
         ]
+        # Also capture comma-separated locations listed right after "Affected areas"
+        for i, ln in enumerate(blk):
+            if ln.lower().startswith("affected area") and i + 1 < len(blk):
+                raw_areas.extend(split_list_field(blk[i + 1]))
+
         suburbs = [
             re.sub(r"\s*\(Link\s*\d+\)", "", re.sub(r"^NBN CVC:\s*", "", a, flags=re.IGNORECASE).replace("Depot", "")).strip()
             for a in raw_areas
+            if not a.startswith("+") and a.lower() not in ("opticomm", "nbn", "affected areas")
         ]
         postcodes = re.findall(r"\((\d{4})\)", blk_text) or ["POI/CVC"]
         if not suburbs:
             suburbs = ["Regional / Metro POI"]
 
-        state_code = infer_state("", postcodes, " ".join(suburbs))
+        state_code = infer_state("", postcodes, f"{' '.join(suburbs)} {blk_text}")
 
         start_str = "To Be Confirmed"
         etr_str = "To Be Confirmed"
@@ -524,18 +534,26 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
             if ln.lower() == "start" and i + 1 < len(blk):
                 dt_match = re.match(r"(\d{1,2}\s+[A-Za-z]+\s+\d{1,2}:\d{2}\s*(?:am|pm))", blk[i + 1], re.IGNORECASE)
                 if dt_match:
-                    try:
-                        parsed_dt = datetime.strptime(f"{dt_match.group(1)} {current_year}", "%d %B %I:%M %p %Y")
-                        start_str = format_12h_local(parsed_dt.strftime("%Y-%m-%d %H:%M"), state_code)
-                    except ValueError:
+                    for date_fmt in ("%d %b %I:%M %p %Y", "%d %B %I:%M %p %Y"):
+                        try:
+                            parsed_dt = datetime.strptime(f"{dt_match.group(1)} {current_year}", date_fmt)
+                            start_str = format_12h_local(parsed_dt.strftime("%Y-%m-%d %H:%M"), state_code)
+                            break
+                        except ValueError:
+                            continue
+                    if start_str == "To Be Confirmed":
                         start_str = dt_match.group(1)
             if ln.lower() == "expected end" and i + 1 < len(blk):
                 dt_match = re.match(r"(\d{1,2}\s+[A-Za-z]+\s+\d{1,2}:\d{2}\s*(?:am|pm))", blk[i + 1], re.IGNORECASE)
                 if dt_match:
-                    try:
-                        parsed_dt = datetime.strptime(f"{dt_match.group(1)} {current_year}", "%d %B %I:%M %p %Y")
-                        etr_str = format_12h_local(parsed_dt.strftime("%Y-%m-%d %H:%M"), state_code)
-                    except ValueError:
+                    for date_fmt in ("%d %b %I:%M %p %Y", "%d %B %I:%M %p %Y"):
+                        try:
+                            parsed_dt = datetime.strptime(f"{dt_match.group(1)} {current_year}", date_fmt)
+                            etr_str = format_12h_local(parsed_dt.strftime("%Y-%m-%d %H:%M"), state_code)
+                            break
+                        except ValueError:
+                            continue
+                    if etr_str == "To Be Confirmed":
                         etr_str = dt_match.group(1)
 
         records.append({
@@ -546,7 +564,7 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
             "suburbs": list(dict.fromkeys(suburbs))[:8],
             "postcodes": list(dict.fromkeys(postcodes)),
             "technology": "Opticomm Fibre" if carrier == "Opticomm" else "NBN CVC / POI",
-            "poiOrExchange": ", ".join(raw_areas[:4]) if raw_areas else "Aussie Broadband CVC",
+            "poiOrExchange": ", ".join(list(dict.fromkeys(raw_areas))[:4]) if raw_areas else "Aussie Broadband CVC",
             "cause": f"{blk[0]} reported on Aussie Broadband network status feed.",
             "summary": f"{carrier} {status.lower()} affecting {', '.join(list(dict.fromkeys(suburbs))[:4])} ({state_code}).",
             "startTime": start_str,
