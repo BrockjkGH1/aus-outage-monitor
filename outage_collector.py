@@ -45,7 +45,13 @@ OPTICOMM_CSV_DIRECT_URL = "https://www.opticomm.com.au/api/network/register/?for
 # These expose real-time NBN POI/CVC outages, Opticomm estate faults, and scheduled works
 AUSSIE_BB_OUTAGES_URL = "https://www.aussiebroadband.com.au/network/outages/"
 LAUNTEL_OUTAGES_URL = "https://www.launtel.net.au/outages-announcements"
-SUPERLOOP_OUTAGES_URL = "https://www.superloop.com/outages/"
+
+# Unblocked Atlassian Statuspage JSON APIs for major Australian NBN/Opticomm RSPs
+STATUSPAGE_ENDPOINTS: List[Tuple[str, str]] = [
+    ("Superloop", "https://status.superloop.com/api/v2/summary.json"),
+    ("Swoop", "https://status.swoop.com.au/api/v2/summary.json"),
+    ("Exetel", "https://status.exetel.com.au/api/v2/summary.json"),
+]
 
 # Optional: Comma-separated URLs of additional public RSP status JSON feeds
 # Example: export RSP_STATUS_FEED_URLS="https://example-rsp.com.au/api/outages.json"
@@ -53,9 +59,16 @@ EXTRA_JSON_FEEDS = [
     u.strip() for u in os.getenv("RSP_STATUS_FEED_URLS", "").split(",") if u.strip()
 ]
 
-USER_AGENT = (
-    "Mozilla/5.0 (compatible; AusOutageMonitor/1.0; +https://github.com/outage-monitor)"
-)
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/129.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/csv,*/*;q=0.8",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "Cache-Control": "no-cache",
+}
 
 # Australian State/Territory Timezones
 STATE_TIMEZONES: Dict[str, Tuple[str, str]] = {
@@ -125,12 +138,38 @@ KNOWN_POI_STATES: Dict[str, str] = {
 # -----------------------------------------------------------------------------
 # 2. HELPER FUNCTIONS (12-HOUR TIME, STATE INFERENCE & TEXT CLEANING)
 # -----------------------------------------------------------------------------
-def fetch_url_text(url: str, timeout: int = 25) -> str:
-    """Fetches a URL using urllib with a standard User-Agent header."""
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        charset = resp.headers.get_content_charset() or "utf-8"
-        return resp.read().decode(charset, errors="replace")
+def fetch_url_text(url: str, timeout: int = 30, use_reader_first: bool = False) -> str:
+    """
+    Fetches a URL using urllib with desktop browser headers.
+    For JS-rendered pages or WAF-protected sites on GitHub Actions IPs,
+    uses Jina Reader (r.jina.ai) which executes page JS and returns clean text.
+    """
+    urls_to_try = []
+    reader_url = f"https://r.jina.ai/{url}"
+    if use_reader_first:
+        urls_to_try = [reader_url, url]
+    else:
+        urls_to_try = [url, reader_url]
+
+    last_err: Optional[Exception] = None
+    for target in urls_to_try:
+        try:
+            headers = dict(BROWSER_HEADERS)
+            if "r.jina.ai" in target:
+                headers["X-Return-Format"] = "markdown"
+            req = urllib.request.Request(target, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                charset = resp.headers.get_content_charset() or "utf-8"
+                body = resp.read().decode(charset, errors="replace")
+                if body and len(body.strip()) > 40:
+                    return body
+        except Exception as exc:
+            last_err = exc
+            print(f"[INFO] Fetch attempt failed for {target}: {exc}")
+
+    if last_err:
+        raise last_err
+    return ""
 
 
 def discover_csv_url(page_url: str) -> Optional[str]:
@@ -400,64 +439,92 @@ def strip_html_to_lines(html_text: str) -> List[str]:
 
 def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
     """
-    Parses Aussie Broadband's live public outages & scheduled maintenance page,
-    which publishes granular NBN CVC/POI and Opticomm network events with
-    exact suburb/POI names and start/end windows.
+    Parses Aussie Broadband's live public outages & scheduled maintenance page
+    (via Next.js __NEXT_DATA__ JSON or structured HTML text), capturing NBN
+    CVC/POI and Opticomm network events with suburb/POI names and 12h windows.
     """
     records: List[Dict[str, Any]] = []
     now_awst = datetime.now(ZoneInfo("Australia/Perth"))
     now_str = now_awst.strftime("%I:%M %p AWST").lstrip("0")
     current_year = now_awst.year
 
-    # First check if Aussie BB embeds structured JSON state/props in the page
-    json_blobs = re.findall(r"(\[\s*\{.*?\}\s*\])", html_text, flags=re.DOTALL)
-    for blob in json_blobs:
-        if "CVC" not in blob and "Opticomm" not in blob and "outage" not in blob.lower():
-            continue
+    # 1. Extract from Next.js __NEXT_DATA__ JSON payload if present
+    next_data_match = re.search(
+        r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+        html_text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if next_data_match:
         try:
-            items = json.loads(blob)
-            if isinstance(items, list) and items and isinstance(items[0], dict):
-                for idx, obj in enumerate(items, start=1):
-                    title = str(obj.get("title") or obj.get("name") or obj.get("type") or "")
-                    areas = obj.get("affected_areas") or obj.get("areas") or []
-                    if not title and not areas:
+            next_json = json.loads(next_data_match.group(1))
+            candidate_lists: List[List[Dict[str, Any]]] = []
+
+            def walk_json(node: Any) -> None:
+                if isinstance(node, dict):
+                    for v in node.values():
+                        walk_json(v)
+                elif isinstance(node, list):
+                    if node and all(isinstance(x, dict) for x in node):
+                        sample_keys = {k.lower() for k in node[0].keys()}
+                        if sample_keys & {"affectedareas", "affected_areas", "servicesaffected", "services_affected", "expectedend", "expected_end"}:
+                            candidate_lists.append(node)
+                    for item in node:
+                        walk_json(item)
+
+            walk_json(next_json)
+
+            for item_list in candidate_lists:
+                for idx, obj in enumerate(item_list, start=1):
+                    status_raw = str(obj.get("status") or obj.get("type") or obj.get("category") or "")
+                    if "completed" in status_raw.lower() or "past" in status_raw.lower():
                         continue
-                    area_list = [str(a) for a in areas] if isinstance(areas, list) else split_list_field(str(areas))
-                    joined = f"{title} {' '.join(area_list)}".lower()
+                    services_raw = obj.get("servicesAffected") or obj.get("services_affected") or obj.get("services") or ""
+                    services_str = ", ".join(services_raw) if isinstance(services_raw, list) else str(services_raw)
+                    areas_raw = obj.get("affectedAreas") or obj.get("affected_areas") or obj.get("areas") or []
+                    area_list = [str(a) for a in areas_raw] if isinstance(areas_raw, list) else split_list_field(str(areas_raw))
+
+                    joined = f"{status_raw} {services_str} {' '.join(area_list)}".lower()
+                    if not area_list and not services_str:
+                        continue
                     if "mobile" in joined and "nbn" not in joined and "opticomm" not in joined:
                         continue
+
                     carrier = "Opticomm" if "opticomm" in joined else "NBN"
                     suburbs = [
                         re.sub(r"\s*\(Link\s*\d+\)", "", a.replace("NBN CVC:", "").replace("Depot", "")).strip()
                         for a in area_list
-                        if not a.lower().startswith("wholesalenbncvc")
-                    ] or ["Multiple POIs"]
-                    state_code = infer_state("", [], " ".join(suburbs))
-                    status = normalize_status(title)
-                    start_raw = str(obj.get("start") or obj.get("start_date") or "")
-                    end_raw = str(obj.get("end") or obj.get("expected_end") or "")
+                        if not a.lower().startswith("wholesalenbncvc") and not a.startswith("+")
+                    ] or ["Metro / Regional POI"]
+                    postcodes = re.findall(r"\((\d{4})\)", " ".join(area_list)) or ["POI/CVC"]
+                    state_code = infer_state("", postcodes, " ".join(suburbs))
+                    status = normalize_status(status_raw or str(obj.get("title") or "Network Maintenance"))
+
+                    start_raw = str(obj.get("start") or obj.get("startDate") or obj.get("start_date") or "")
+                    end_raw = str(obj.get("expectedEnd") or obj.get("expected_end") or obj.get("end") or "")
+                    desc_raw = str(obj.get("description") or obj.get("summary") or obj.get("title") or f"{status} affecting {services_str or carrier}.")
+
                     records.append({
-                        "id": f"ABB-{obj.get('id', idx)}",
+                        "id": f"ABB-{obj.get('id', f'{now_awst.strftime(\"%m%d\")}-{idx:02d}')}",
                         "carrier": carrier,
                         "status": status,
                         "state": state_code,
-                        "suburbs": suburbs[:8],
-                        "postcodes": ["POI/CVC"],
+                        "suburbs": list(dict.fromkeys(suburbs))[:8],
+                        "postcodes": list(dict.fromkeys(postcodes)),
                         "technology": "Opticomm Fibre" if carrier == "Opticomm" else "NBN CVC / POI",
                         "poiOrExchange": ", ".join(area_list[:4]) or "Aussie Broadband Network",
-                        "cause": title or "RSP Wholesale Backhaul / CVC Event",
-                        "summary": f"Reported via Aussie Broadband NOC feed affecting {', '.join(suburbs[:4])}.",
+                        "cause": re.sub(r"<[^>]+>", " ", desc_raw).strip(),
+                        "summary": f"{carrier} {status.lower()} affecting {', '.join(list(dict.fromkeys(suburbs))[:4])} ({state_code}).",
                         "startTime": format_12h_local(start_raw, state_code) if start_raw else now_str,
                         "etr": format_12h_local(end_raw, state_code) if end_raw else "To Be Confirmed",
                         "affectedPremises": 0,
-                        "updates": [{"time": now_str, "note": "Ingested from Aussie Broadband Live Status Feed."}],
+                        "updates": [{"time": now_str, "note": "Synchronized from Aussie Broadband Live Status Feed."}],
                     })
-                if records:
-                    return records
-        except Exception:
-            pass
+            if records:
+                return records
+        except Exception as exc:
+            print(f"[WARN] Next.js JSON parse fallback on Aussie BB: {exc}")
 
-    # Fallback: parse clean text blocks between "Current outages" and "Past outages"
+    # 2. Fallback: parse clean text blocks between "Current outages" and "Past outages"
     lines = strip_html_to_lines(html_text)
     in_active_section = False
     block_lines: List[str] = []
@@ -475,24 +542,25 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
         if not in_active_section:
             continue
 
-        if low in ("network maintenance", "unscheduled outage", "planned outage", "outage", "degraded performance"):
+        if any(k == low or low.startswith(k) for k in ("network maintenance", "unscheduled outage", "planned outage", "degraded performance")):
             if block_lines:
                 blocks.append(block_lines)
             block_lines = [line]
         elif block_lines:
             block_lines.append(line)
 
+    if block_lines and block_lines not in blocks:
+        blocks.append(block_lines)
+
     for idx, blk in enumerate(blocks, start=1):
         blk_text = " ".join(blk)
         low_text = blk_text.lower()
-        # Skip mobile-only outages
         if "mobile phones" in low_text and "nbn" not in low_text and "opticomm" not in low_text:
             continue
 
         carrier = "Opticomm" if "opticomm" in low_text else "NBN"
         status = normalize_status(blk[0])
 
-        # Extract NBN CVC / POI / Suburb names
         raw_areas = [
             ln for ln in blk
             if ln.startswith("NBN CVC:") or "Opticomm" in ln or re.match(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*\(\d{4}\)$", ln)
@@ -507,7 +575,6 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
 
         state_code = infer_state("", postcodes, " ".join(suburbs))
 
-        # Parse Start / Expected end lines (e.g., "22 November 9:00 am")
         start_str = "To Be Confirmed"
         etr_str = "To Be Confirmed"
         for i, ln in enumerate(blk):
@@ -560,10 +627,10 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
     in_active = False
     for idx, line in enumerate(lines):
         low = line.lower()
-        if low in ("current outages", "upcoming maintenance"):
+        if "current outages" in low or "upcoming maintenance" in low:
             in_active = True
             continue
-        if low.startswith("recent outages"):
+        if "recent outages" in low:
             break
         if not in_active or "no current outages" in low or "no upcoming maintenance" in low:
             continue
@@ -588,6 +655,77 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
                 "affectedPremises": 0,
                 "updates": [{"time": now_str, "note": "Synchronized from Launtel Outages & Announcements."}],
             })
+
+    return records
+
+
+def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str, Any]]:
+    """
+    Parses Atlassian Statuspage /api/v2/summary.json feeds (Superloop, Swoop, Exetel)
+    for active NBN & Opticomm incidents and scheduled maintenances.
+    """
+    records: List[Dict[str, Any]] = []
+    try:
+        payload = json.loads(raw_json_text)
+    except Exception:
+        return records
+
+    now_str = datetime.now(ZoneInfo("Australia/Perth")).strftime("%I:%M %p AWST").lstrip("0")
+    all_events = []
+    for inc in payload.get("incidents", []) or []:
+        all_events.append(("incident", inc))
+    for maint in payload.get("scheduled_maintenances", []) or []:
+        if str(maint.get("status", "")).lower() in ("scheduled", "in_progress", "verifying"):
+            all_events.append(("maintenance", maint))
+
+    for kind, ev in all_events:
+        name = str(ev.get("name") or "")
+        updates_list = ev.get("incident_updates") or []
+        latest_body = str(updates_list[0].get("body") if updates_list else "")
+        combined = f"{name} {latest_body}".lower()
+
+        # Focus on NBN, Opticomm, or regional/metro backhaul faults
+        if not any(k in combined for k in ("nbn", "opticomm", "poi", "cvc", "fibre", "fttp", "fttn", "hfc", "outage", "maintenance")):
+            continue
+
+        carrier = "Opticomm" if "opticomm" in combined else "NBN"
+        postcodes = re.findall(r"\b(\d{4})\b", f"{name} {latest_body}")
+        state_code = infer_state("", postcodes, f"{name} {latest_body}")
+        status = "Planned Maintenance" if kind == "maintenance" else normalize_status(str(ev.get("status") or name))
+
+        # Extract suburb/POI names from title
+        suburb_hint = re.sub(r"^(?:NBN|Opticomm)\s*[-:]\s*", "", name, flags=re.IGNORECASE).strip()
+        suburbs = [suburb_hint[:65]] if suburb_hint else ["Metro / Regional POI"]
+
+        start_raw = str(ev.get("scheduled_for") or ev.get("started_at") or ev.get("created_at") or "")
+        end_raw = str(ev.get("scheduled_until") or "")
+
+        formatted_updates = []
+        for u in updates_list[:4]:
+            u_ts = format_12h_local(str(u.get("created_at") or ""), state_code)
+            formatted_updates.append({
+                "time": u_ts,
+                "note": str(u.get("body") or "").strip()
+            })
+        if not formatted_updates:
+            formatted_updates.append({"time": now_str, "note": f"Synchronized from {rsp_name} Live Status API."})
+
+        records.append({
+            "id": f"{rsp_name[:3].upper()}-{ev.get('id', '000')}",
+            "carrier": carrier,
+            "status": status,
+            "state": state_code,
+            "suburbs": suburbs,
+            "postcodes": list(dict.fromkeys(postcodes)) or ["RSP-API"],
+            "technology": "Opticomm Fibre" if carrier == "Opticomm" else "NBN Multi-Tech",
+            "poiOrExchange": f"{rsp_name} Status Feed",
+            "cause": name,
+            "summary": latest_body[:260] if latest_body else name,
+            "startTime": format_12h_local(start_raw, state_code) if start_raw else now_str,
+            "etr": format_12h_local(end_raw, state_code) if end_raw else "To Be Confirmed",
+            "affectedPremises": 0,
+            "updates": formatted_updates,
+        })
 
     return records
 
@@ -628,10 +766,11 @@ def collect_all_outages() -> List[Dict[str, Any]]:
     else:
         print("[WARN] No Opticomm CSV link discovered on register page.")
 
-    # 3. Fetch Aussie Broadband Live Status Feed (NBN CVC/POI & Opticomm)
+    # 3. Fetch Aussie Broadband Live Status Feed via JS-rendering reader
     try:
         print(f"[INFO] Fetching Aussie Broadband Status: {AUSSIE_BB_OUTAGES_URL}")
-        abb_html = fetch_url_text(AUSSIE_BB_OUTAGES_URL)
+        abb_html = fetch_url_text(AUSSIE_BB_OUTAGES_URL, use_reader_first=True)
+        print(f"[DEBUG] Aussie BB response length: {len(abb_html)} chars")
         abb_items = parse_aussie_bb_status(abb_html)
         print(f"[INFO] Parsed {len(abb_items)} active/upcoming Aussie Broadband records.")
         all_records.extend(abb_items)
@@ -641,14 +780,26 @@ def collect_all_outages() -> List[Dict[str, Any]]:
     # 4. Fetch Launtel Live Outages & Announcements Feed
     try:
         print(f"[INFO] Fetching Launtel Status: {LAUNTEL_OUTAGES_URL}")
-        lau_html = fetch_url_text(LAUNTEL_OUTAGES_URL)
+        lau_html = fetch_url_text(LAUNTEL_OUTAGES_URL, use_reader_first=True)
+        print(f"[DEBUG] Launtel response length: {len(lau_html)} chars")
         lau_items = parse_launtel_status(lau_html)
         print(f"[INFO] Parsed {len(lau_items)} active Launtel records.")
         all_records.extend(lau_items)
     except Exception as exc:
         print(f"[WARN] Could not parse Launtel status page: {exc}")
 
-    # 5. Fetch any optional custom RSP JSON feeds
+    # 5. Fetch unblocked Australian RSP Statuspage JSON APIs (Superloop, Swoop, Exetel)
+    for rsp_name, sp_url in STATUSPAGE_ENDPOINTS:
+        try:
+            print(f"[INFO] Fetching {rsp_name} Status API: {sp_url}")
+            sp_json = fetch_url_text(sp_url)
+            sp_items = parse_statuspage_summary(rsp_name, sp_json)
+            print(f"[INFO] Parsed {len(sp_items)} active {rsp_name} records.")
+            all_records.extend(sp_items)
+        except Exception as exc:
+            print(f"[WARN] Could not parse {rsp_name} status API: {exc}")
+
+    # 6. Fetch any optional custom RSP JSON feeds
     for feed_url in EXTRA_JSON_FEEDS:
         try:
             print(f"[INFO] Fetching supplementary JSON feed: {feed_url}")
