@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NBN & Opticomm Live Outage Monitor</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            noc: {
+              bg: '#090d16',
+              surface: '#111827',
+              card: '#161f32',
+              border: '#243049',
+              hover: '#1d283f'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    /* Custom scrollbar for NOC aesthetic */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #243049;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #36476b;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.85); opacity: 0.9; }
+      70% { transform: scale(1.8); opacity: 0; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+    .live-pulse::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 9999px;
+      background-color: #10b981;
+      animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+    }
+  </style>
+</head>
+<body class="bg-noc-bg text-slate-200 font-sans antialiased min-h-screen flex flex-col selection:bg-indigo-500/30 selection:text-indigo-200">
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Top Header Bar -->
+  <header class="sticky top-0 z-30 bg-noc-surface/95 backdrop-blur-md border-b border-noc-border px-4 sm:px-6 py-3.5 shadow-lg">
+    <div class="max-w-[1600px] mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      
+      <!-- Title & Operational Pulse -->
+      <div class="flex items-center gap-3.5">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600/20 to-emerald-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
+          <i class="fa-solid fa-tower-broadcast text-indigo-400 text-lg"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <h1 class="text-lg sm:text-xl font-bold text-white tracking-tight">NBN &amp; Opticomm Live Outage Monitor</h1>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+              <span class="relative w-2 h-2 rounded-full bg-emerald-400 live-pulse"></span>
+              NOC FEED ACTIVE
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">National Carrier Incident &amp; Planned Maintenance Telemetry (ACMA / RSP Registers)</p>
+        </div>
+      </div>
+
+      <!-- Right Controls: Sync Timer, Manual Sync, Feed Config -->
+      <div class="flex flex-wrap items-center gap-2.5 sm:gap-3">
+        <!-- Data Source Indicator Badge -->
+        <div id="feed-source-badge" class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-noc-card border border-noc-border text-xs text-slate-300">
+          <i class="fa-solid fa-database text-indigo-400"></i>
+          <span>Source: <strong id="feed-source-label" class="text-white font-medium">Built-in NOC Dataset</strong></span>
+        </div>
+
+        <!-- Countdown & Last Updated -->
+        <div class="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-noc-card border border-noc-border text-xs">
+          <div class="flex items-center gap-1.5 text-slate-300">
+            <i class="fa-regular fa-clock text-amber-400"></i>
+            <span>Next auto-sync in <strong id="countdown-timer" class="font-mono text-white">59:59</strong></span>
+          </div>
+          <span class="text-slate-600">|</span>
+          <div class="text-slate-400 hidden md:block">
+            Updated: <span id="last-updated-time" class="font-semibold text-slate-200">--:-- AM</span>
+          </div>
+        </div>
+
+        <!-- Sync Now Button -->
+        <button id="sync-now-btn" onclick="triggerManualSync()" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white text-xs font-semibold transition shadow-sm shadow-indigo-950 cursor-pointer">
+          <i id="sync-icon" class="fa-solid fa-arrows-rotate"></i>
+          <span>Sync Now</span>
+        </button>
+
+        <!-- Feed Setup Button -->
+        <button onclick="openFeedModal()" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-noc-card hover:bg-noc-hover border border-noc-border text-slate-200 text-xs font-medium transition cursor-pointer" title="Configure Hourly JSON Feed">
+          <i class="fa-solid fa-plug text-emerald-400"></i>
+          <span class="hidden sm:inline">Feed Setup</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Australian State Local Clocks Strip (12-Hour AM/PM) -->
+    <div class="max-w-[1600px] mx-auto mt-3 pt-2.5 border-t border-noc-border/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div class="flex items-center gap-1.5 text-slate-400 font-medium">
+        <i class="fa-regular fa-clock text-indigo-400"></i>
+        <span>Live State Clocks (12-Hour Local Time):</span>
+      </div>
+      <div id="state-clocks-strip" class="flex flex-wrap items-center gap-2">
+        <!-- Live 12-hour state clocks injected via JS -->
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- KPI Summary Row -->
+    <section aria-label="Network Key Performance Indicators" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
+      <!-- Total Active Incidents -->
+      <div class="bg-noc-surface border border-noc-border rounded-xl p-4 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+          <span>ACTIVE INCIDENTS</span>
+          <span class="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+          </span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span id="kpi-active" class="text-2xl sm:text-3xl font-bold text-white font-mono">0</span>
+          <span class="text-xs text-slate-400">open / ongoing</span>
+        </div>
+      </div>
+
+      <!-- NBN Incidents -->
+      <div class="bg-noc-surface border border-noc-border rounded-xl p-4 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+          <span>NBN CO INCIDENTS</span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">NBN</span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span id="kpi-nbn" class="text-2xl sm:text-3xl font-bold text-indigo-400 font-mono">0</span>
+          <span id="kpi-nbn-sub" class="text-xs text-slate-400">across states</span>
+        </div>
+      </div>
+
+      <!-- Opticomm Incidents -->
+      <div class="bg-noc-surface border border-noc-border rounded-xl p-4 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+          <span>OPTICOMM INCIDENTS</span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/15 text-teal-300 border border-teal-500/30">OPTICOMM</span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span id="kpi-opticomm" class="text-2xl sm:text-3xl font-bold text-teal-400 font-mono">0</span>
+          <span id="kpi-opticomm-sub" class="text-xs text-slate-400">fibre estates</span>
+        </div>
+      </div>
+
+      <!-- Affected States/Territories -->
+      <div class="bg-noc-surface border border-noc-border rounded-xl p-4 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+          <span>AFFECTED STATES</span>
+          <span class="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+            <i class="fa-solid fa-map-location-dot"></i>
+          </span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span id="kpi-states" class="text-2xl sm:text-3xl font-bold text-white font-mono">0</span>
+          <span class="text-xs text-slate-400">of 8 jurisdictions</span>
+        </div>
+      </div>
+
+      <!-- Total Estimated Premises Impacted -->
+      <div class="col-span-2 sm:col-span-1 bg-noc-surface border border-noc-border rounded-xl p-4 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+          <span>PREMISES IMPACTED</span>
+          <span class="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
+            <i class="fa-solid fa-house-signal"></i>
+          </span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span id="kpi-premises" class="text-2xl sm:text-3xl font-bold text-white font-mono">0</span>
+          <span class="text-xs text-slate-400">active services</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filter & Search Control Bar -->
+    <section aria-label="Filter and Search Controls" class="bg-noc-surface border border-noc-border rounded-xl p-4 space-y-4 shadow-sm">
+      <!-- Top Filter Row: Carrier Toggle, Status Dropdown, Search Bar, Reset -->
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
+        
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Carrier Segmented Control -->
+          <div class="inline-flex p-1 rounded-lg bg-noc-bg border border-noc-border" role="group" aria-label="Carrier Filter">
+            <button type="button" data-carrier="ALL" onclick="setCarrierFilter('ALL')" class="carrier-btn px-3.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer bg-slate-700 text-white shadow-sm">
+              All Carriers
+            </button>
+            <button type="button" data-carrier="NBN" onclick="setCarrierFilter('NBN')" class="carrier-btn px-3.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer text-slate-400 hover:text-white flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-indigo-400"></span> NBN
+            </button>
+            <button type="button" data-carrier="Opticomm" onclick="setCarrierFilter('Opticomm')" class="carrier-btn px-3.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer text-slate-400 hover:text-white flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-teal-400"></span> Opticomm
+            </button>
+          </div>
+
+          <!-- Severity / Incident Type Select -->
+          <div class="relative">
+            <select id="status-filter" onchange="applyFilters()" class="appearance-none bg-noc-bg border border-noc-border text-slate-200 text-xs font-medium rounded-lg pl-3.5 pr-9 py-2.5 focus:outline-none focus:border-indigo-500 cursor-pointer">
+              <option value="ALL">All Incident Types</option>
+              <option value="Unplanned Outage">🔴 Unplanned Outage</option>
+              <option value="Degraded Performance">🟠 Degraded / Intermittent</option>
+              <option value="Planned Maintenance">🔵 Planned Maintenance</option>
+              <option value="Resolved">🟢 Resolved</option>
+            </select>
+            <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+          </div>
+        </div>
+
+        <!-- Search Input & Clear Button -->
+        <div class="flex flex-1 lg:max-w-lg items-center gap-2.5">
+          <div class="relative flex-1">
+            <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+            <input
+              type="text"
+              id="search-input"
+              oninput="applyFilters()"
+              placeholder="Search Suburb, Postcode, Incident ID (INC...), or Tech (FTTP, HFC)..."
+              class="w-full bg-noc-bg border border-noc-border rounded-lg pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+            />
+            <button id="clear-search-x" onclick="clearSearchInput()" class="hidden text-slate-400 hover:text-white text-xs absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <button onclick="resetAllFilters()" class="px-3 py-2 rounded-lg bg-noc-card hover:bg-noc-hover border border-noc-border text-slate-300 hover:text-white text-xs font-medium transition shrink-0 cursor-pointer">
+            Clear Filters
+          </button>
+        </div>
+      </div>
+
+      <!-- Bottom Filter Row: State / Territory Pills with Dynamic Counts -->
+      <div class="pt-3 border-t border-noc-border/70 flex flex-wrap items-center gap-2">
+        <span class="text-xs font-medium text-slate-400 mr-1 flex items-center gap-1.5">
+          <i class="fa-solid fa-location-dot text-slate-500"></i> State / Territory:
+        </span>
+        <div id="state-pills-container" class="flex flex-wrap items-center gap-1.5">
+          <!-- Populated dynamically via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content Split View -->
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      
+      <!-- Left / Main Panel: Outage Feed (8 columns on xl) -->
+      <div class="xl:col-span-8 space-y-4">
+        
+        <!-- Feed Header & View Toggle -->
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <h2 class="text-base font-semibold text-white">Incident Feed</h2>
+            <span id="filtered-count-badge" class="px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-noc-card border border-noc-border text-slate-300">
+              0 incidents
+            </span>
+          </div>
+
+          <!-- Card vs Table View Switcher -->
+          <div class="inline-flex p-1 rounded-lg bg-noc-surface border border-noc-border">
+            <button id="view-cards-btn" onclick="setViewMode('cards')" class="px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer bg-indigo-600 text-white flex items-center gap-1.5">
+              <i class="fa-solid fa-grip"></i> Cards
+            </button>
+            <button id="view-table-btn" onclick="setViewMode('table')" class="px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer text-slate-400 hover:text-white flex items-center gap-1.5">
+              <i class="fa-solid fa-table-list"></i> Table
+            </button>
+          </div>
+        </div>
+
+        <!-- Cards Container -->
+        <div id="incidents-cards-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Incident cards injected via JS -->
+        </div>
+
+        <!-- Table Container (Hidden by default) -->
+        <div id="incidents-table-container" class="hidden bg-noc-surface border border-noc-border rounded-xl overflow-hidden shadow-sm">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-noc-card/80 border-b border-noc-border text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  <th class="py-3 px-4">Carrier / ID</th>
+                  <th class="py-3 px-4">Status</th>
+                  <th class="py-3 px-4">State &amp; Suburbs</th>
+                  <th class="py-3 px-4">Tech</th>
+                  <th class="py-3 px-4">Premises</th>
+                  <th class="py-3 px-4">ETR</th>
+                  <th class="py-3 px-4 text-right">Details</th>
+                </tr>
+              </thead>
+              <tbody id="incidents-table-body" class="divide-y divide-noc-border/60 text-xs">
+                <!-- Table rows injected via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="hidden bg-noc-surface border border-noc-border rounded-xl p-10 text-center">
+          <div class="w-12 h-12 rounded-full bg-noc-card border border-noc-border flex items-center justify-center mx-auto mb-3 text-slate-400">
+            <i class="fa-solid fa-filter-circle-xmark text-lg"></i>
+          </div>
+          <h3 class="text-sm font-semibold text-white">No matching outages or maintenance events</h3>
+          <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto">Try clearing your suburb/postcode search or selecting "ALL" states to view all active national carrier incidents.</p>
+          <button onclick="resetAllFilters()" class="mt-4 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition cursor-pointer">
+            Reset All Filters
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Right Sidebar Panel: State Breakdown & Hourly Sync Card (4 columns on xl) -->
+      <aside class="xl:col-span-4 space-y-5">
+        
+        <!-- State & Territory Breakdown Chart Card -->
+        <div class="bg-noc-surface border border-noc-border rounded-xl p-5 shadow-sm">
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+              <i class="fa-solid fa-chart-bar text-indigo-400"></i>
+              Active Incidents by State
+            </h3>
+            <span class="text-[11px] text-slate-400">Click bar to filter</span>
+          </div>
+          <p class="text-xs text-slate-400 mb-4">Distribution of open outages &amp; degradations across Australia.</p>
+          
+          <div id="state-chart-container" class="space-y-3">
+            <!-- Horizontal bars injected via JS -->
+          </div>
+        </div>
+
+        <!-- Technology & Severity Breakdown Card -->
+        <div class="bg-noc-surface border border-noc-border rounded-xl p-5 shadow-sm">
+          <h3 class="text-sm font-semibold text-white flex items-center gap-2 mb-3.5">
+            <i class="fa-solid fa-network-wired text-teal-400"></i>
+            Impacted Access Technologies
+          </h3>
+          <div id="tech-breakdown-container" class="flex flex-wrap gap-2">
+            <!-- Tech badges injected via JS -->
+          </div>
+        </div>
+
+        <!-- Hourly Automation & Data Pipeline Card -->
+        <div class="bg-gradient-to-br from-noc-surface to-noc-card border border-noc-border rounded-xl p-5 shadow-sm">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 mb-2">
+                <i class="fa-solid fa-clock-rotate-left"></i> HOURLY AUTO-SYNC
+              </span>
+              <h3 class="text-sm font-semibold text-white">Online Database Integration</h3>
+            </div>
+            <button onclick="openFeedModal()" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium underline cursor-pointer shrink-0">
+              Configure URL
+            </button>
+          </div>
+          <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+            This dashboard polls your normalized JSON endpoint (GitHub Raw, Firebase, or Google Apps Script) every <strong class="text-slate-200">60 minutes</strong> and updates all state/suburb metrics automatically.
+          </p>
+          <div class="mt-4 pt-3.5 border-t border-noc-border/80 flex items-center justify-between text-xs">
+            <span class="text-slate-400">Endpoint Status:</span>
+            <span id="sidebar-endpoint-status" class="font-mono text-emerald-400 flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-check"></i> Ready (Simulated Live)
+            </span>
+          </div>
+        </div>
+
+      </aside>
+    </div>
+  </main>
+
+  <!-- Incident Detail Slide-Over Drawer -->
+  <div id="detail-drawer-backdrop" onclick="closeDetailDrawer()" class="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 hidden transition-opacity"></div>
+  <aside id="detail-drawer" class="fixed top-0 right-0 h-full w-full max-w-xl bg-noc-surface border-l border-noc-border z-50 transform translate-x-full transition-transform duration-300 ease-in-out flex flex-col shadow-2xl">
+    <!-- Drawer Header -->
+    <div class="px-6 py-4 bg-noc-card border-b border-noc-border flex items-center justify-between gap-4">
+      <div class="flex items-center gap-2.5 flex-wrap">
+        <span id="drawer-carrier-badge"></span>
+        <span id="drawer-incident-id" class="font-mono text-sm font-bold text-white">INC000000</span>
+      </div>
+      <button onclick="closeDetailDrawer()" class="w-8 h-8 rounded-lg bg-noc-surface hover:bg-noc-hover border border-noc-border text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer" aria-label="Close details">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- Drawer Body -->
+    <div id="drawer-content" class="flex-1 overflow-y-auto p-6 space-y-6">
+      <!-- Populated dynamically -->
+    </div>
+
+    <!-- Drawer Footer: Copy Ticket Summary -->
+    <div class="px-6 py-4 bg-noc-card border-t border-noc-border flex flex-col sm:flex-row items-center justify-between gap-3">
+      <span class="text-xs text-slate-400">Ready for CRM ticket notes or customer SMS/email</span>
+      <button id="copy-summary-btn" onclick="copyIncidentSummary()" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold transition shadow-sm cursor-pointer">
+        <i class="fa-regular fa-copy"></i>
+        <span>Copy Customer / Ticket Summary</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Feed Configuration & Hourly Sync Modal -->
+  <div id="feed-modal-backdrop" onclick="closeFeedModal()" class="fixed inset-0 bg-black/75 backdrop-blur-xs z-40 hidden"></div>
+  <div id="feed-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 pointer-events-none">
+    <div class="bg-noc-surface border border-noc-border rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl pointer-events-auto overflow-hidden">
+      <!-- Modal Header -->
+      <div class="px-6 py-4 bg-noc-card border-b border-noc-border flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <i class="fa-solid fa-plug text-emerald-400"></i>
+          <h3 class="text-base font-bold text-white">Feed Source &amp; Hourly Sync Setup</h3>
+        </div>
+        <button onclick="closeFeedModal()" class="w-8 h-8 rounded-lg bg-noc-surface hover:bg-noc-hover border border-noc-border text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Modal Content -->
+      <div class="p-6 overflow-y-auto space-y-5 text-xs">
+        <div class="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25 text-indigo-200 leading-relaxed">
+          <strong>How Hourly Updates Work:</strong> Connect a scheduled collector script (GitHub Actions, Python cron, or Google Apps Script) that parses NBN &amp; Opticomm ACMA outage registers every hour and outputs a JSON array to a public URL. Paste that URL below to switch the dashboard to live remote polling.
+        </div>
+
+        <!-- Remote JSON URL Input -->
+        <div class="space-y-2">
+          <label for="remote-json-url" class="block font-semibold text-slate-200">Live JSON Feed URL (GitHub Raw, Firebase, or Apps Script)</label>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <input
+              type="url"
+              id="remote-json-url"
+              placeholder="https://raw.githubusercontent.com/your-org/outages-feed/main/outages.json"
+              class="flex-1 bg-noc-bg border border-noc-border rounded-lg px-3.5 py-2.5 text-white font-mono text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+            <button onclick="connectRemoteFeed()" class="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition shrink-0 cursor-pointer">
+              Connect &amp; Fetch
+            </button>
+          </div>
+          <div class="flex items-center justify-between pt-1">
+            <span id="remote-url-feedback" class="text-slate-400">Currently using built-in realistic Australian dataset.</span>
+            <button onclick="revertToBuiltInData()" class="text-amber-400 hover:text-amber-300 underline cursor-pointer">Reset to Built-in Dataset</button>
+          </div>
+        </div>
+
+        <!-- Test Custom JSON Payload Ingestion -->
+        <div class="space-y-2 pt-2 border-t border-noc-border">
+          <div class="flex items-center justify-between">
+            <label for="custom-json-paste" class="font-semibold text-slate-200">Test Live JSON Ingestion (Paste Array)</label>
+            <button onclick="loadSampleSnippetIntoTextarea()" class="text-indigo-400 hover:text-indigo-300 underline cursor-pointer">Insert Valid Sample JSON</button>
+          </div>
+          <textarea
+            id="custom-json-paste"
+            rows="4"
+            placeholder='[ { "id": "INC0099123", "carrier": "Opticomm", "status": "Unplanned Outage", "state": "WA", "suburbs": ["Balga", "Mirrabooka"], "postcodes": ["6061"], ... } ]'
+            class="w-full bg-noc-bg border border-noc-border rounded-lg p-3 text-slate-200 font-mono text-[11px] placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+          ></textarea>
+          <button onclick="ingestPastedJson()" class="px-3.5 py-2 rounded-lg bg-noc-card hover:bg-noc-hover border border-noc-border text-emerald-400 font-semibold transition cursor-pointer">
+            <i class="fa-solid fa-file-import mr-1.5"></i> Load Pasted JSON into Dashboard
+          </button>
+        </div>
+
+        <!-- Expected JSON Schema Reference -->
+        <div class="space-y-2 pt-2 border-t border-noc-border">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-slate-200">Expected Normalized JSON Schema</span>
+            <button onclick="copySchemaSnippet()" class="text-slate-400 hover:text-white cursor-pointer">
+              <i class="fa-regular fa-copy mr-1"></i> Copy Schema
+            </button>
+          </div>
+          <pre id="schema-preview" class="bg-noc-bg border border-noc-border rounded-lg p-3 font-mono text-[11px] text-slate-300 overflow-x-auto leading-relaxed">{
+  "id": "INC0048291",
+  "carrier": "NBN", // "NBN" | "Opticomm"
+  "status": "Unplanned Outage", // "Unplanned Outage" | "Degraded Performance" | "Planned Maintenance" | "Resolved"
+  "state": "WA", // "WA" | "NSW" | "VIC" | "QLD" | "SA" | "TAS" | "NT" | "ACT"
+  "suburbs": ["Balga", "Westminster"],
+  "postcodes": ["6061"],
+  "technology": "FTTP",
+  "poiOrExchange": "2BAL-01 (Balga FAN)",
+  "cause": "Third-party civil works fibre optic cable sever",
+  "summary": "Complete loss of optical signal affecting FTTP premises in northern Balga.",
+  "startTime": "2026-11-21 1:00 AM AWST",
+  "etr": "2026-11-21 3:00 AM AWST",
+  "affectedPremises": 420,
+  "updates": [
+    { "time": "2:10 AM AWST", "note": "Civil splicing crew arrived on site; pit excavation underway." }
+  ]
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script>
+    // =========================================================================
+    // 1. AUSTRALIAN STATE TIMEZONE & PLAIN-ENGLISH 12-HOUR CLOCK HELPERS
+    // =========================================================================
+    const STATE_TIMEZONE_CONFIG = {
+      WA:  { timeZone: "Australia/Perth",     label: "WA Time",  shortZone: "AWST" },
+      SA:  { timeZone: "Australia/Adelaide",  label: "SA Time",  shortZone: "ACDT" },
+      NT:  { timeZone: "Australia/Darwin",    label: "NT Time",  shortZone: "ACST" },
+      QLD: { timeZone: "Australia/Brisbane",  label: "QLD Time", shortZone: "AEST" },
+      NSW: { timeZone: "Australia/Sydney",    label: "NSW Time", shortZone: "AEDT" },
+      VIC: { timeZone: "Australia/Melbourne", label: "VIC Time", shortZone: "AEDT" },
+      TAS: { timeZone: "Australia/Hobart",    label: "TAS Time", shortZone: "AEDT" },
+      ACT: { timeZone: "Australia/Canberra",  label: "ACT Time", shortZone: "AEDT" }
+    };
+
+    const STATE_CLOCK_GROUPS = [
+      { code: "WA",  statesLabel: "WA",                timeZone: "Australia/Perth",    zoneTag: "AWST" },
+      { code: "SA",  statesLabel: "SA",                timeZone: "Australia/Adelaide", zoneTag: "ACDT" },
+      { code: "NT",  statesLabel: "NT",                timeZone: "Australia/Darwin",   zoneTag: "ACST" },
+      { code: "QLD", statesLabel: "QLD",               timeZone: "Australia/Brisbane", zoneTag: "AEST" },
+      { code: "NSW", statesLabel: "NSW / VIC / TAS / ACT", timeZone: "Australia/Sydney", zoneTag: "AEDT" }
+    ];
+
+    /**
+     * Converts any 24-hour or 12-hour timestamp string into clean 12-hour AM/PM format.
+     * Examples:
+     *   "2026-11-21 13:45 AWST" -> { datePart: "Nov 21", time12: "1:45 PM", compact12: "1:45pm", tz: "AWST", full: "Nov 21, 1:45 PM AWST" }
+     *   "2026-11-22 00:00 AEDT" -> { datePart: "Nov 22", time12: "12:00 AM", compact12: "12am", tz: "AEDT", full: "Nov 22, 12:00 AM AEDT" }
+     *   "Restored 13:40 ACDT"   -> { datePart: "", time12: "Restored 1:40 PM", compact12: "Restored 1:40pm", tz: "ACDT", full: "Restored 1:40 PM ACDT" }
+     */
+    function parseAndFormat12Hour(rawStr, stateCode = "WA") {
+      const tzFallback = STATE_TIMEZONE_CONFIG[stateCode]?.shortZone || "AWST";
+      if (!rawStr) {
+        return { datePart: "", time12: "TBC", compact12: "TBC", tz: tzFallback, full: "To Be Confirmed" };
+      }
+
+      const str = String(rawStr).trim();
+
+      // Match optional YYYY-MM-DD, optional prefix (like "Restored"), HH:MM (with optional AM/PM), and optional timezone code
+      const regex = /^(?:(\d{4}-\d{2}-\d{2})\s+)?(?:(Restored)\s+)?(\d{1,2}):(\d{2})(?:\s*(AM|PM|am|pm))?(?:\s+([A-Z]{3,4}))?$/;
+      const match = str.match(regex);
+
+      if (!match) {
+        return { datePart: "", time12: str, compact12: str, tz: tzFallback, full: str };
+      }
+
+      const [, isoDate, prefixWord, rawHourStr, minStr, existingMeridiem, tzCode] = match;
+      let hour = parseInt(rawHourStr, 10);
+      const minute = parseInt(minStr, 10);
+      const tz = tzCode || tzFallback;
+
+      let meridiem = "AM";
+      if (existingMeridiem) {
+        meridiem = existingMeridiem.toUpperCase();
+        if (hour === 0) hour = 12;
+        if (hour > 12) hour = hour % 12;
+      } else {
+        if (hour === 0) {
+          hour = 12;
+          meridiem = "AM";
+        } else if (hour === 12) {
+          meridiem = "PM";
+        } else if (hour > 12) {
+          hour -= 12;
+          meridiem = "PM";
+        } else {
+          meridiem = "AM";
+        }
+      }
+
+      const formattedMinutes = String(minute).padStart(2, "0");
+      const prefix = prefixWord ? `${prefixWord} ` : "";
+      const time12 = `${prefix}${hour}:${formattedMinutes} ${meridiem}`;
+      const compact12 = minute === 0
+        ? `${prefix}${hour}${meridiem.toLowerCase()}`
+        : `${prefix}${hour}:${formattedMinutes}${meridiem.toLowerCase()}`;
+
+      let datePart = "";
+      if (isoDate) {
+        const [y, m, d] = isoDate.split("-").map(Number);
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        datePart = `${months[(m - 1) % 12]} ${d}`;
+      }
+
+      const full = datePart
+        ? `${datePart}, ${time12} ${tz}`
+        : `${time12} ${tz}`;
+
+      return { datePart, time12, compact12, tz, full };
+    }
+
+    /**
+     * Builds a plain-English outage window sentence, e.g.:
+     * "1:00 AM start to 3:00 AM estimated service restoration time (WA Time)"
+     * or if spanning across midnight:
+     * "Nov 21, 1:45 PM start to Nov 21, 10:30 PM estimated service restoration time (WA Time)"
+     */
+    function getPlainEnglishWindow(item) {
+      const stateLabel = STATE_TIMEZONE_CONFIG[item.state]?.label || `${item.state} Time`;
+      const startObj = parseAndFormat12Hour(item.startTime, item.state);
+      const etrObj = parseAndFormat12Hour(item.etr, item.state);
+
+      if (String(item.etr).toLowerCase().startsWith("restored")) {
+        return `${startObj.compact12} start — ${etrObj.time12} (${stateLabel})`;
+      }
+
+      const sameDate = startObj.datePart && etrObj.datePart && startObj.datePart === etrObj.datePart;
+      if (sameDate) {
+        return `${startObj.compact12} start to ${etrObj.compact12} estimated service restoration time (${stateLabel})`;
+      }
+
+      const startPhrase = startObj.datePart ? `${startObj.datePart}, ${startObj.compact12}` : startObj.compact12;
+      const etrPhrase = etrObj.datePart ? `${etrObj.datePart}, ${etrObj.compact12}` : etrObj.compact12;
+      return `${startPhrase} start to ${etrPhrase} estimated service restoration time (${stateLabel})`;
+    }
+
+    function updateStateClocksStrip() {
+      const container = document.getElementById("state-clocks-strip");
+      if (!container) return;
+
+      const now = new Date();
+      container.innerHTML = STATE_CLOCK_GROUPS.map(group => {
+        const formattedTime = new Intl.DateTimeFormat("en-AU", {
+          timeZone: group.timeZone,
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        }).format(now).toUpperCase();
+
+        const isFiltered = (group.code === "NSW" && ["NSW", "VIC", "TAS", "ACT"].includes(state.stateFilter))
+          || state.stateFilter === group.code;
+
+        return `
+          <button
+            type="button"
+            onclick="setStateFilter('${group.code}')"
+            title="Filter by ${group.statesLabel}"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] transition cursor-pointer ${
+              isFiltered
+                ? "bg-indigo-600/25 border-indigo-500/60 text-white"
+                : "bg-noc-bg/90 border-noc-border/80 text-slate-300 hover:border-slate-600 hover:text-white"
+            }"
+          >
+            <span class="font-semibold text-slate-400">${group.statesLabel}:</span>
+            <span class="font-bold text-white">${formattedTime}</span>
+            <span class="text-[10px] text-indigo-300 font-medium">${group.zoneTag}</span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    // =========================================================================
+    // 2. REALISTIC PRE-LOADED DATASET (14 Incidents across all 8 AU States/Territories)
+    // =========================================================================
+    const BUILT_IN_INCIDENTS = [
+      {
+        id: "INC0048291",
+        carrier: "NBN",
+        status: "Unplanned Outage",
+        state: "WA",
+        suburbs: ["Balga", "Westminster", "Nollamara"],
+        postcodes: ["6061"],
+        technology: "FTTP",
+        poiOrExchange: "6BAL-01 (Balga Fibre Access Node)",
+        cause: "Third-party civil contractor excavation severed 288-core distribution fibre.",
+        summary: "Total loss of connectivity for FTTP services fed from Balga North distribution hub. Splicing teams on site.",
+        startTime: "2026-11-21 1:45 PM AWST",
+        etr: "2026-11-21 10:30 PM AWST",
+        affectedPremises: 640,
+        updates: [
+          { time: "5:30 PM AWST", note: "Damaged conduit exposed; fibre splicing trailer positioned and prepping ribbons." },
+          { time: "2:50 PM AWST", note: "OTDR fault localization confirmed break 1.4km north of Balga FAN." },
+          { time: "1:45 PM AWST", note: "Major optical alarm triggered across multiple splitters in 6061." }
+        ]
+      },
+      {
+        id: "OPT-2026-8841",
+        carrier: "Opticomm",
+        status: "Unplanned Outage",
+        state: "WA",
+        suburbs: ["Alkimos", "Eglinton", "Shorehaven"],
+        postcodes: ["6038"],
+        technology: "Opticomm Fibre",
+        poiOrExchange: "PER-ALK-OLT02 (Alkimos Estate Headend)",
+        cause: "Western Power grid outage exceeding headend battery reserve capacity.",
+        summary: "Unplanned power loss affecting Opticomm FTTP estate nodes in Alkimos and Eglinton. Mobile generator dispatched.",
+        startTime: "2026-11-21 3:10 PM AWST",
+        etr: "2026-11-21 8:00 PM AWST",
+        affectedPremises: 1120,
+        updates: [
+          { time: "5:15 PM AWST", note: "Backup diesel generator connected; OLT chassis rebooting and re-ranging ONTs." },
+          { time: "3:10 PM AWST", note: "Loss of mains power reported at Alkimos aggregation shelter." }
+        ]
+      },
+      {
+        id: "OPT-2026-8819",
+        carrier: "Opticomm",
+        status: "Degraded Performance",
+        state: "WA",
+        suburbs: ["Ellenbrook", "Aveley", "Brabham"],
+        postcodes: ["6069", "6055"],
+        technology: "Opticomm Fibre",
+        poiOrExchange: "PER-ELB-AGG01 (Swan Valley Backhaul)",
+        cause: "Intermittent packet loss and elevated latency on redundant transit link.",
+        summary: "Customers in Ellenbrook and Aveley estates may experience buffering or slow speeds during peak evening traffic.",
+        startTime: "2026-11-21 11:20 AM AWST",
+        etr: "2026-11-21 11:00 PM AWST",
+        affectedPremises: 1850,
+        updates: [
+          { time: "4:40 PM AWST", note: "Traffic engineering re-routed 60% of load onto secondary Perth CBD ring." },
+          { time: "11:20 AM AWST", note: "High optical bit-error rate detected on primary 100G DWDM wavelength." }
+        ]
+      },
+      {
+        id: "INC0048104",
+        carrier: "NBN",
+        status: "Unplanned Outage",
+        state: "NSW",
+        suburbs: ["Marsden Park", "Schofields", "Riverstone"],
+        postcodes: ["2765", "2762"],
+        technology: "FTTP",
+        poiOrExchange: "2RIV-02 (Riverstone POI)",
+        cause: "Water ingress in underground pit following localized severe storm activity.",
+        summary: "Complete service drop for FTTP premises across new residential stages in Marsden Park and Schofields.",
+        startTime: "2026-11-21 2:05 PM AEDT",
+        etr: "2026-11-22 1:00 AM AEDT",
+        affectedPremises: 890,
+        updates: [
+          { time: "7:30 PM AEDT", note: "Pit dewatering completed; technicians replacing compromised splice enclosure." },
+          { time: "2:05 PM AEDT", note: "Multiple PON ports down at Riverstone OLT." }
+        ]
+      },
+      {
+        id: "OPT-2026-8790",
+        carrier: "Opticomm",
+        status: "Planned Maintenance",
+        state: "NSW",
+        suburbs: ["Oran Park", "Gregory Hills", "Harrington Park"],
+        postcodes: ["2570", "2557"],
+        technology: "Opticomm Fibre",
+        poiOrExchange: "SYD-ORP-OLT01 (Oran Park Town)",
+        cause: "Scheduled core router firmware upgrade and 400G uplink capacity expansion.",
+        summary: "A 45-minute service interruption is expected within the maintenance window while core switches reload.",
+        startTime: "2026-11-22 1:00 AM AEDT",
+        etr: "2026-11-22 3:00 AM AEDT",
+        affectedPremises: 2400,
+        updates: [
+          { time: "12:00 PM AEDT", note: "Change window confirmed; RSP notifications issued 7 days prior." }
+        ]
+      },
+      {
+        id: "INC0047988",
+        carrier: "NBN",
+        status: "Degraded Performance",
+        state: "NSW",
+        suburbs: ["Chatswood", "Artarmon", "Lane Cove"],
+        postcodes: ["2067", "2064", "2066"],
+        technology: "HFC",
+        poiOrExchange: "2CHA-01 (Chatswood POI)",
+        cause: "Upstream RF ingress noise affecting coaxial optical node.",
+        summary: "Intermittent dropouts and degraded upload throughput for HFC modems connected to node CHA-04B.",
+        startTime: "2026-11-21 9:15 AM AEDT",
+        etr: "2026-11-21 10:00 PM AEDT",
+        affectedPremises: 310,
+        updates: [
+          { time: "6:15 PM AEDT", note: "Field technician isolating noisy tap on Pacific Hwy coax leg." }
+        ]
+      },
+      {
+        id: "OPT-2026-8833",
+        carrier: "Opticomm",
+        status: "Unplanned Outage",
+        state: "VIC",
+        suburbs: ["Armstrong Creek", "Charlemont", "Mount Duneed"],
+        postcodes: ["3217"],
+        technology: "Opticomm Fibre",
+        poiOrExchange: "MEL-ARM-OLT03 (Geelong South Hub)",
+        cause: "Vandalism and copper/fibre theft in roadside telecom cabinet.",
+        summary: "Critical outage affecting multiple Opticomm residential villages in Armstrong Creek and Mount Duneed.",
+        startTime: "2026-11-21 12:30 PM AEDT",
+        etr: "2026-11-22 2:30 AM AEDT",
+        affectedPremises: 1460,
+        updates: [
+          { time: "7:45 PM AEDT", note: "Replacement distribution frame mounted; fusion splicing 50% complete." },
+          { time: "1:10 PM AEDT", note: "Victoria Police notified; emergency hardware dispatched from Melbourne warehouse." }
+        ]
+      },
+      {
+        id: "INC0048250",
+        carrier: "NBN",
+        status: "Unplanned Outage",
+        state: "VIC",
+        suburbs: ["Tarneit", "Truganina", "Williams Landing"],
+        postcodes: ["3029", "3027"],
+        technology: "FTTP",
+        poiOrExchange: "3WEE-01 (Werribee POI)",
+        cause: "Dual-path fibre damage caused by directional boring rig.",
+        summary: "Unplanned outage impacting FTTP services in central Tarneit estates.",
+        startTime: "2026-11-21 3:50 PM AEDT",
+        etr: "2026-11-22 12:30 AM AEDT",
+        affectedPremises: 780,
+        updates: [
+          { time: "7:00 PM AEDT", note: "New haul cable pulled through adjacent duct; jointing commenced." }
+        ]
+      },
+      {
+        id: "OPT-2026-8802",
+        carrier: "Opticomm",
+        status: "Unplanned Outage",
+        state: "QLD",
+        suburbs: ["Yarrabilba", "Logan Village"],
+        postcodes: ["4207"],
+        technology: "Opticomm Fibre",
+        poiOrExchange: "BNE-YAR-OLT01 (Yarrabilba Exchange)",
+        cause: "Vehicle collision with roadside communications pillar.",
+        summary: "Total loss of fibre services for eastern precincts of Yarrabilba following motor vehicle accident.",
+        startTime: "2026-11-21 1:15 PM AEST",
+        etr: "2026-11-21 11:30 PM AEST",
+        affectedPremises: 530,
+        updates: [
+          { time: "6:20 PM AEST", note: "Site cleared by emergency services; Opticomm crew installing new street cabinet." }
+        ]
+      },
+      {
+        id: "INC0048199",
+        carrier: "NBN",
+        status: "Degraded Performance",
+        state: "QLD",
+        suburbs: ["Springfield Central", "Brookwater", "Augustine Heights"],
+        postcodes: ["4300"],
+        technology: "FTTP",
+        poiOrExchange: "4GNA-01 (Goodna POI)",
+        cause: "Line card optical transceiver degradation on NBN OLT slot 4.",
+        summary: "Intermittent sync drops lasting 1-3 minutes every hour. Replacement card scheduled for hot-swap.",
+        startTime: "2026-11-21 10:00 AM AEST",
+        etr: "2026-11-21 9:30 PM AEST",
+        affectedPremises: 410,
+        updates: [
+          { time: "5:45 PM AEST", note: "Engineer on site at Goodna POI preparing controlled card failover." }
+        ]
+      },
+      {
+        id: "OPT-2026-8775",
+        carrier: "Opticomm",
+        status: "Resolved",
+        state: "SA",
+        suburbs: ["Mount Barker", "Littlehampton"],
+        postcodes: ["5251", "5250"],
+        technology: "Opticomm Fibre",
+        poiOrExchange: "ADL-MTB-OLT01 (Adelaide Hills Hub)",
+        cause: "Failed cooling unit triggered thermal protection shutdown on aggregation switch.",
+        summary: "Services fully restored after HVAC repair and switch stabilization. Monitoring continues.",
+        startTime: "2026-11-21 8:30 AM ACDT",
+        etr: "Restored 1:40 PM ACDT",
+        affectedPremises: 690,
+        updates: [
+          { time: "1:40 PM ACDT", note: "All ONTs re-registered; traffic levels nominal. Incident resolved." },
+          { time: "11:15 AM ACDT", note: "Portable cooling installed; ambient rack temp back to 22°C." }
+        ]
+      },
+      {
+        id: "INC0047812",
+        carrier: "NBN",
+        status: "Planned Maintenance",
+        state: "TAS",
+        suburbs: ["Kingston", "Blackmans Bay", "Huntingfield"],
+        postcodes: ["7050", "7052"],
+        technology: "FTTN",
+        poiOrExchange: "7HOB-01 (Hobart POI - Node 7KIN-14)",
+        cause: "TasNetworks planned pole replacement & FTTN pillar battery bank renewal.",
+        summary: "FTTN VDSL2 services will experience brief interruptions during battery swap.",
+        startTime: "2026-11-22 1:00 AM AEDT",
+        etr: "2026-11-22 4:30 AM AEDT",
+        affectedPremises: 245,
+        updates: [
+          { time: "10:00 AM AEDT", note: "Pre-checks passed; no impact prior to scheduled window." }
+        ]
+      },
+      {
+        id: "INC0048305",
+        carrier: "NBN",
+        status: "Unplanned Outage",
+        state: "NT",
+        suburbs: ["Palmerston", "Durack", "Zuccoli"],
+        postcodes: ["0830", "0832"],
+        technology: "Fixed Wireless",
+        poiOrExchange: "8DAR-01 (Darwin POI - Tower 8PAL-FW02)",
+        cause: "Lightning strike tripped tower surge arrestors and microwave backhaul radio.",
+        summary: "Fixed Wireless premises pointed to Zuccoli/Palmerston sector experiencing complete signal loss.",
+        startTime: "2026-11-21 3:20 PM ACST",
+        etr: "2026-11-22 10:00 AM ACST",
+        affectedPremises: 195,
+        updates: [
+          { time: "6:00 PM ACST", note: "Rigger crew scheduled for first light due to active electrical storm warnings." }
+        ]
+      },
+      {
+        id: "INC0047910",
+        carrier: "NBN",
+        status: "Resolved",
+        state: "ACT",
+        suburbs: ["Gungahlin", "Franklin", "Harrison"],
+        postcodes: ["2912", "2913", "2914"],
+        technology: "FTTP",
+        poiOrExchange: "2GUN-01 (Gungahlin POI)",
+        cause: "BGP session flap on upstream transit router.",
+        summary: "Brief 12-minute routing disruption resolved automatically via redundant path convergence.",
+        startTime: "2026-11-21 6:12 AM AEDT",
+        etr: "Restored 6:24 AM AEDT",
+        affectedPremises: 1520,
+        updates: [
+          { time: "6:24 AM AEDT", note: "All sessions stable; post-incident review logged." }
+        ]
+      }
+    ];
+
+    // =========================================================================
+    // 3. APPLICATION STATE
+    // =========================================================================
+    const AU_STATES = ["ALL", "WA", "NSW", "VIC", "QLD", "SA", "TAS", "NT", "ACT"];
+    
+    let state = {
+      incidents: [...BUILT_IN_INCIDENTS],
+      carrierFilter: "ALL",      // "ALL" | "NBN" | "Opticomm"
+      stateFilter: "ALL",        // "ALL" | "WA" | "NSW" | ...
+      statusFilter: "ALL",       // "ALL" | "Unplanned Outage" | ...
+      searchQuery: "",
+      viewMode: "cards",         // "cards" | "table"
+      selectedIncidentId: null,
+      remoteFeedUrl: "",
+      feedSourceName: "Built-in NOC Dataset",
+      secondsRemaining: 3600     // 60 minutes (1 hour) countdown
+    };
+
+    // =========================================================================
+    // 4. INITIALIZATION & COUNTDOWN TIMER (60 MINUTES)
+    // =========================================================================
+    document.addEventListener("DOMContentLoaded", () => {
+      updateLastUpdatedTimestamp();
+      updateStateClocksStrip();
+      renderDashboard();
+      startHourlyCountdown();
+    });
+
+    function startHourlyCountdown() {
+      setInterval(() => {
+        state.secondsRemaining--;
+        if (state.secondsRemaining <= 0) {
+          state.secondsRemaining = 3600;
+          performDataSync(true);
+        }
+        updateCountdownDisplay();
+        // Refresh state local clocks every 15 seconds so minute rollovers stay exact
+        if (state.secondsRemaining % 15 === 0) {
+          updateStateClocksStrip();
+        }
+      }, 1000);
+    }
+
+    function updateCountdownDisplay() {
+      const mins = Math.floor(state.secondsRemaining / 60);
+      const secs = state.secondsRemaining % 60;
+      const formatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      document.getElementById("countdown-timer").textContent = formatted;
+    }
+
+    function updateLastUpdatedTimestamp() {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString("en-AU", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+      }).toUpperCase();
+      document.getElementById("last-updated-time").textContent = timeStr;
+      updateStateClocksStrip();
+    }
+
+    // =========================================================================
+    // 5. MANUAL & HOURLY SYNC HANDLERS
+    // =========================================================================
+    function triggerManualSync() {
+      performDataSync(false);
+    }
+
+    async function performDataSync(isAuto) {
+      const icon = document.getElementById("sync-icon");
+      icon.classList.add("fa-spin");
+
+      try {
+        if (state.remoteFeedUrl) {
+          const response = await fetch(state.remoteFeedUrl, { cache: "no-store" });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          if (!Array.isArray(data)) throw new Error("Feed root must be a JSON array.");
+          state.incidents = data;
+          showToast(isAuto ? "Hourly auto-sync completed from remote JSON." : "Synced latest incidents from remote endpoint.", "success");
+        } else {
+          // Simulate live polling refresh on built-in dataset
+          await new Promise(resolve => setTimeout(resolve, 450));
+          showToast(isAuto ? "Hourly auto-sync completed (NOC dataset refreshed)." : "Dashboard synced with latest carrier telemetry.", "success");
+        }
+
+        state.secondsRemaining = 3600;
+        updateCountdownDisplay();
+        updateLastUpdatedTimestamp();
+        renderDashboard();
+      } catch (err) {
+        showToast(`Sync failed: ${err.message}. Retaining cached records.`, "error");
+      } finally {
+        setTimeout(() => icon.classList.remove("fa-spin"), 400);
+      }
+    }
+
+    // =========================================================================
+    // 6. FILTERING LOGIC
+    // =========================================================================
+    function setCarrierFilter(carrier) {
+      state.carrierFilter = carrier;
+      document.querySelectorAll(".carrier-btn").forEach(btn => {
+        const isTarget = btn.getAttribute("data-carrier") === carrier;
+        if (isTarget) {
+          btn.classList.remove("text-slate-400", "hover:text-white");
+          btn.classList.add("bg-slate-700", "text-white", "shadow-sm");
+        } else {
+          btn.classList.add("text-slate-400", "hover:text-white");
+          btn.classList.remove("bg-slate-700", "text-white", "shadow-sm");
+        }
+      });
+      renderDashboard();
+    }
+
+    function setStateFilter(st) {
+      state.stateFilter = st;
+      renderDashboard();
+    }
+
+    function applyFilters() {
+      state.statusFilter = document.getElementById("status-filter").value;
+      const searchVal = document.getElementById("search-input").value;
+      state.searchQuery = searchVal.trim().toLowerCase();
+
+      const clearX = document.getElementById("clear-search-x");
+      if (searchVal.length > 0) {
+        clearX.classList.remove("hidden");
+      } else {
+        clearX.classList.add("hidden");
+      }
+
+      renderDashboard();
+    }
+
+    function clearSearchInput() {
+      document.getElementById("search-input").value = "";
+      applyFilters();
+    }
+
+    function resetAllFilters() {
+      state.carrierFilter = "ALL";
+      state.stateFilter = "ALL";
+      state.statusFilter = "ALL";
+      state.searchQuery = "";
+      document.getElementById("status-filter").value = "ALL";
+      document.getElementById("search-input").value = "";
+      document.getElementById("clear-search-x").classList.add("hidden");
+      setCarrierFilter("ALL");
+    }
+
+    function getFilteredIncidents() {
+      return state.incidents.filter(item => {
+        // Carrier check
+        if (state.carrierFilter !== "ALL" && item.carrier !== state.carrierFilter) {
+          return false;
+        }
+        // State check
+        if (state.stateFilter !== "ALL" && item.state !== state.stateFilter) {
+          return false;
+        }
+        // Status check
+        if (state.statusFilter !== "ALL" && item.status !== state.statusFilter) {
+          return false;
+        }
+        // Search query check (Suburb, Postcode, ID, Technology, Cause, POI)
+        if (state.searchQuery) {
+          const q = state.searchQuery;
+          const haystack = [
+            item.id,
+            item.carrier,
+            item.state,
+            item.technology,
+            item.cause,
+            item.summary,
+            item.poiOrExchange || "",
+            ...(item.suburbs || []),
+            ...(item.postcodes || [])
+          ].join(" ").toLowerCase();
+
+          if (!haystack.includes(q)) return false;
+        }
+        return true;
+      });
+    }
+
+    // =========================================================================
+    // 6. VIEW MODE SWITCHER (CARDS VS TABLE)
+    // =========================================================================
+    function setViewMode(mode) {
+      state.viewMode = mode;
+      const cardsBtn = document.getElementById("view-cards-btn");
+      const tableBtn = document.getElementById("view-table-btn");
+      const cardsContainer = document.getElementById("incidents-cards-container");
+      const tableContainer = document.getElementById("incidents-table-container");
+
+      if (mode === "cards") {
+        cardsBtn.classList.add("bg-indigo-600", "text-white");
+        cardsBtn.classList.remove("text-slate-400", "hover:text-white");
+        tableBtn.classList.remove("bg-indigo-600", "text-white");
+        tableBtn.classList.add("text-slate-400", "hover:text-white");
+        cardsContainer.classList.remove("hidden");
+        tableContainer.classList.add("hidden");
+      } else {
+        tableBtn.classList.add("bg-indigo-600", "text-white");
+        tableBtn.classList.remove("text-slate-400", "hover:text-white");
+        cardsBtn.classList.remove("bg-indigo-600", "text-white");
+        cardsBtn.classList.add("text-slate-400", "hover:text-white");
+        tableContainer.classList.remove("hidden");
+        cardsContainer.classList.add("hidden");
+      }
+      renderDashboard();
+    }
+
+    // =========================================================================
+    // 7. UI STYLING HELPERS (BADGES & STATUS PILLS)
+    // =========================================================================
+    function getCarrierBadgeHTML(carrier) {
+      if (carrier === "NBN") {
+        return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold tracking-wide bg-indigo-500/15 text-indigo-300 border border-indigo-500/35">
+                  <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span> NBN
+                </span>`;
+      }
+      return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold tracking-wide bg-teal-500/15 text-teal-300 border border-teal-500/35">
+                <span class="w-1.5 h-1.5 rounded-full bg-teal-400"></span> OPTICOMM
+              </span>`;
+    }
+
+    function getStatusPillHTML(status) {
+      switch (status) {
+        case "Unplanned Outage":
+          return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/35">
+                    <span class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span> Unplanned Outage
+                  </span>`;
+        case "Degraded Performance":
+          return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/35">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> Degraded / Intermittent
+                  </span>`;
+        case "Planned Maintenance":
+          return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-sky-500/15 text-sky-300 border border-sky-500/35">
+                    <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span> Planned Maintenance
+                  </span>`;
+        case "Resolved":
+        default:
+          return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/35">
+                    <i class="fa-solid fa-check text-[10px]"></i> Resolved
+                  </span>`;
+      }
+    }
+
+    // =========================================================================
+    // 8. RENDERING FUNCTIONS (KPIs, PILLS, CARDS, TABLE, SIDEBAR CHARTS)
+    // =========================================================================
+    function renderDashboard() {
+      const filtered = getFilteredIncidents();
+      updateStateClocksStrip();
+      renderKPIs();
+      renderStatePills();
+      renderStateSidebarChart();
+      renderTechBreakdown();
+      renderIncidentFeed(filtered);
+    }
+
+    function renderKPIs() {
+      // Active incidents exclude "Resolved"
+      const activeList = state.incidents.filter(i => i.status !== "Resolved");
+      const nbnActive = activeList.filter(i => i.carrier === "NBN");
+      const optiActive = activeList.filter(i => i.carrier === "Opticomm");
+      const uniqueStates = new Set(activeList.map(i => i.state));
+      const totalPremises = activeList.reduce((sum, item) => sum + (Number(item.affectedPremises) || 0), 0);
+
+      document.getElementById("kpi-active").textContent = activeList.length;
+      document.getElementById("kpi-nbn").textContent = nbnActive.length;
+      document.getElementById("kpi-nbn-sub").textContent = `${new Set(nbnActive.map(i => i.state)).size} states affected`;
+      document.getElementById("kpi-opticomm").textContent = optiActive.length;
+      document.getElementById("kpi-opticomm-sub").textContent = `${new Set(optiActive.map(i => i.state)).size} states affected`;
+      document.getElementById("kpi-states").textContent = uniqueStates.size;
+      document.getElementById("kpi-premises").textContent = totalPremises.toLocaleString();
+    }
+
+    function renderStatePills() {
+      const container = document.getElementById("state-pills-container");
+      // Count incidents per state respecting current carrier filter
+      const baseForCounts = state.incidents.filter(i => {
+        if (state.carrierFilter !== "ALL" && i.carrier !== state.carrierFilter) return false;
+        if (state.statusFilter !== "ALL" && i.status !== state.statusFilter) return false;
+        return true;
+      });
+
+      container.innerHTML = AU_STATES.map(st => {
+        const count = st === "ALL"
+          ? baseForCounts.length
+          : baseForCounts.filter(i => i.state === st).length;
+        const isActive = state.stateFilter === st;
+
+        const activeClasses = isActive
+          ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+          : "bg-noc-bg text-slate-300 border-noc-border hover:bg-noc-hover hover:text-white";
+
+        const badgeClasses = isActive
+          ? "bg-indigo-800/80 text-indigo-100"
+          : count > 0 ? "bg-noc-card text-slate-300" : "bg-noc-card/50 text-slate-500";
+
+        return `
+          <button type="button" onclick="setStateFilter('${st}')" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer ${activeClasses}">
+            <span>${st}</span>
+            <span class="px-1.5 py-0.2 rounded text-[10px] font-mono ${badgeClasses}">${count}</span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function renderIncidentFeed(filtered) {
+      const countBadge = document.getElementById("filtered-count-badge");
+      countBadge.textContent = `${filtered.length} ${filtered.length === 1 ? 'incident' : 'incidents'}`;
+
+      const cardsContainer = document.getElementById("incidents-cards-container");
+      const tableContainer = document.getElementById("incidents-table-container");
+      const emptyState = document.getElementById("empty-state");
+
+      if (filtered.length === 0) {
+        cardsContainer.classList.add("hidden");
+        tableContainer.classList.add("hidden");
+        emptyState.classList.remove("hidden");
+        return;
+      }
+
+      emptyState.classList.add("hidden");
+
+      if (state.viewMode === "cards") {
+        cardsContainer.classList.remove("hidden");
+        tableContainer.classList.add("hidden");
+        cardsContainer.innerHTML = filtered.map(item => createIncidentCardHTML(item)).join("");
+      } else {
+        tableContainer.classList.remove("hidden");
+        cardsContainer.classList.add("hidden");
+        document.getElementById("incidents-table-body").innerHTML = filtered.map(item => createIncidentRowHTML(item)).join("");
+      }
+    }
+
+    function createIncidentCardHTML(item) {
+      const suburbsDisplay = (item.suburbs || []).join(", ");
+      const postcodesDisplay = (item.postcodes || []).join(", ");
+      const borderHover = item.carrier === "NBN" ? "hover:border-indigo-500/60" : "hover:border-teal-500/60";
+      const startFmt = parseAndFormat12Hour(item.startTime, item.state);
+      const etrFmt = parseAndFormat12Hour(item.etr, item.state);
+      const plainWindow = getPlainEnglishWindow(item);
+
+      return `
+        <article onclick="openDetailDrawer('${item.id}')" class="group bg-noc-surface border border-noc-border ${borderHover} rounded-xl p-4 sm:p-5 flex flex-col justify-between transition duration-150 hover:bg-noc-card/90 cursor-pointer shadow-sm">
+          <div>
+            <!-- Top Row: Carrier + ID + Status -->
+            <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
+              <div class="flex items-center gap-2">
+                ${getCarrierBadgeHTML(item.carrier)}
+                <span class="font-mono text-xs font-semibold text-slate-300 group-hover:text-white transition">${item.id}</span>
+              </div>
+              ${getStatusPillHTML(item.status)}
+            </div>
+
+            <!-- Location Highlight Box (State + Suburbs + Postcodes) -->
+            <div class="p-3 rounded-lg bg-noc-bg/90 border border-noc-border/80 mb-3">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex items-start gap-2">
+                  <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-mono text-xs font-bold shrink-0 mt-0.5">
+                    ${item.state}
+                  </span>
+                  <div>
+                    <h3 class="text-sm font-semibold text-white leading-snug">${suburbsDisplay}</h3>
+                    <p class="text-[11px] font-mono text-slate-400 mt-0.5">Postcodes: <span class="text-slate-300">${postcodesDisplay}</span></p>
+                  </div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-noc-card border border-noc-border text-slate-300 shrink-0">
+                  ${item.technology}
+                </span>
+              </div>
+            </div>
+
+            <!-- Plain-English 12-Hour Service Window Callout -->
+            <div class="px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[11px] text-amber-200/95 mb-3 flex items-start gap-2">
+              <i class="fa-regular fa-clock text-amber-400 mt-0.5 shrink-0"></i>
+              <span class="leading-snug">${plainWindow}</span>
+            </div>
+
+            <!-- Cause / Summary -->
+            <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed mb-4">
+              ${item.cause}
+            </p>
+          </div>
+
+          <!-- Footer Metadata: Start, ETR, Premises (12-Hour Local Time) -->
+          <div class="pt-3 border-t border-noc-border/70 grid grid-cols-3 gap-2 text-[11px]">
+            <div>
+              <span class="block text-slate-500">Start (${startFmt.tz})</span>
+              <span class="font-semibold text-slate-200 truncate block" title="${startFmt.full}">${startFmt.time12}</span>
+            </div>
+            <div>
+              <span class="block text-slate-500">Est. Restoration</span>
+              <span class="font-semibold text-amber-300 truncate block" title="${etrFmt.full}">${etrFmt.time12}</span>
+            </div>
+            <div class="text-right">
+              <span class="block text-slate-500">Premises</span>
+              <span class="font-mono font-semibold text-white">${Number(item.affectedPremises).toLocaleString()}</span>
+            </div>
+          </div>
+        </article>
+      `;
+    }
+
+    function createIncidentRowHTML(item) {
+      const startFmt = parseAndFormat12Hour(item.startTime, item.state);
+      const etrFmt = parseAndFormat12Hour(item.etr, item.state);
+      return `
+        <tr onclick="openDetailDrawer('${item.id}')" class="hover:bg-noc-hover/80 transition cursor-pointer">
+          <td class="py-3.5 px-4 whitespace-nowrap">
+            <div class="flex flex-col gap-1">
+              <div>${getCarrierBadgeHTML(item.carrier)}</div>
+              <span class="font-mono text-[11px] text-slate-300">${item.id}</span>
+            </div>
+          </td>
+          <td class="py-3.5 px-4 whitespace-nowrap">
+            ${getStatusPillHTML(item.status)}
+          </td>
+          <td class="py-3.5 px-4">
+            <div class="flex items-start gap-2">
+              <span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[11px] font-bold text-white shrink-0">${item.state}</span>
+              <div>
+                <div class="font-semibold text-white">${(item.suburbs || []).join(", ")}</div>
+                <div class="text-[11px] font-mono text-slate-400">${(item.postcodes || []).join(", ")}</div>
+              </div>
+            </div>
+          </td>
+          <td class="py-3.5 px-4 whitespace-nowrap font-mono text-slate-300">${item.technology}</td>
+          <td class="py-3.5 px-4 whitespace-nowrap font-mono font-semibold text-white">${Number(item.affectedPremises).toLocaleString()}</td>
+          <td class="py-3.5 px-4 whitespace-nowrap">
+            <div class="font-semibold text-amber-300">${etrFmt.time12} <span class="text-[10px] text-slate-400 font-normal">${etrFmt.tz}</span></div>
+            <div class="text-[10px] text-slate-400">Started ${startFmt.time12}</div>
+          </td>
+          <td class="py-3.5 px-4 whitespace-nowrap text-right">
+            <button class="px-2.5 py-1 rounded bg-noc-card border border-noc-border text-indigo-400 hover:text-indigo-300 text-[11px] font-medium">
+              Inspect <i class="fa-solid fa-chevron-right ml-1 text-[9px]"></i>
+            </button>
+          </td>
+        </tr>
+      `;
+    }
+
+    function renderStateSidebarChart() {
+      const container = document.getElementById("state-chart-container");
+      const statesOnly = ["WA", "NSW", "VIC", "QLD", "SA", "TAS", "NT", "ACT"];
+      const activeItems = state.incidents.filter(i => i.status !== "Resolved");
+
+      const counts = statesOnly.map(st => {
+        const items = activeItems.filter(i => i.state === st);
+        return {
+          state: st,
+          total: items.length,
+          nbn: items.filter(i => i.carrier === "NBN").length,
+          opticomm: items.filter(i => i.carrier === "Opticomm").length
+        };
+      });
+
+      const maxCount = Math.max(...counts.map(c => c.total), 1);
+
+      container.innerHTML = counts.map(row => {
+        const nbnPct = (row.nbn / maxCount) * 100;
+        const optiPct = (row.opticomm / maxCount) * 100;
+        const isSelected = state.stateFilter === row.state;
+
+        return `
+          <button type="button" onclick="setStateFilter('${isSelected ? 'ALL' : row.state}')" class="w-full text-left group p-1.5 -mx-1.5 rounded-lg transition cursor-pointer ${isSelected ? 'bg-indigo-500/15 ring-1 ring-indigo-500/40' : 'hover:bg-noc-hover/60'}">
+            <div class="flex items-center justify-between text-xs mb-1">
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-bold w-8 ${isSelected ? 'text-indigo-300' : 'text-slate-200'}">${row.state}</span>
+                <span class="text-[11px] text-slate-400">
+                  ${row.nbn > 0 ? `<span class="text-indigo-400">${row.nbn} NBN</span>` : ''}
+                  ${row.nbn > 0 && row.opticomm > 0 ? ' · ' : ''}
+                  ${row.opticomm > 0 ? `<span class="text-teal-400">${row.opticomm} Opticomm</span>` : ''}
+                  ${row.total === 0 ? 'No active faults' : ''}
+                </span>
+              </div>
+              <span class="font-mono font-semibold text-white">${row.total}</span>
+            </div>
+            <div class="w-full h-2 rounded-full bg-noc-bg overflow-hidden flex">
+              <div style="width: ${nbnPct}%" class="bg-indigo-500 h-full transition-all duration-300"></div>
+              <div style="width: ${optiPct}%" class="bg-teal-400 h-full transition-all duration-300"></div>
+            </div>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function renderTechBreakdown() {
+      const container = document.getElementById("tech-breakdown-container");
+      const activeItems = state.incidents.filter(i => i.status !== "Resolved");
+      const techMap = {};
+
+      activeItems.forEach(item => {
+        const t = item.technology || "Unknown";
+        techMap[t] = (techMap[t] || 0) + 1;
+      });
+
+      const entries = Object.entries(techMap).sort((a, b) => b[1] - a[1]);
+
+      if (entries.length === 0) {
+        container.innerHTML = `<span class="text-xs text-slate-400">No active technology impacts.</span>`;
+        return;
+      }
+
+      container.innerHTML = entries.map(([tech, count]) => `
+        <button onclick="filterByTech('${tech}')" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-noc-bg hover:bg-noc-hover border border-noc-border text-xs transition cursor-pointer">
+          <span class="font-mono text-slate-200">${tech}</span>
+          <span class="px-1.5 py-0.2 rounded bg-noc-card text-indigo-300 font-mono font-bold text-[11px]">${count}</span>
+        </button>
+      `).join("");
+    }
+
+    function filterByTech(tech) {
+      const input = document.getElementById("search-input");
+      input.value = tech;
+      applyFilters();
+    }
+
+    // =========================================================================
+    // 9. INCIDENT DETAIL SLIDE-OVER DRAWER & CLIPBOARD COPY
+    // =========================================================================
+    function openDetailDrawer(incidentId) {
+      const item = state.incidents.find(i => i.id === incidentId);
+      if (!item) return;
+
+      state.selectedIncidentId = incidentId;
+
+      const startFmt = parseAndFormat12Hour(item.startTime, item.state);
+      const etrFmt = parseAndFormat12Hour(item.etr, item.state);
+      const plainWindow = getPlainEnglishWindow(item);
+      const stateTimeLabel = STATE_TIMEZONE_CONFIG[item.state]?.label || `${item.state} Time`;
+
+      document.getElementById("drawer-carrier-badge").innerHTML = getCarrierBadgeHTML(item.carrier);
+      document.getElementById("drawer-incident-id").textContent = item.id;
+
+      const updatesHTML = (item.updates && item.updates.length > 0)
+        ? item.updates.map((u, idx) => {
+            const uFmt = parseAndFormat12Hour(u.time, item.state);
+            return `
+              <div class="relative pl-5 pb-4 ${idx === item.updates.length - 1 ? '' : 'border-l border-noc-border'}">
+                <span class="absolute -left-[5px] top-1 w-2.5 h-2.5 rounded-full ${idx === 0 ? 'bg-indigo-400 ring-4 ring-indigo-500/20' : 'bg-slate-600'}"></span>
+                <div class="text-[11px] font-semibold text-slate-400 mb-0.5">${uFmt.full}</div>
+                <p class="text-xs text-slate-200 leading-relaxed">${u.note}</p>
+              </div>
+            `;
+          }).join("")
+        : `<p class="text-xs text-slate-400">No field engineering log entries published yet.</p>`;
+
+      document.getElementById("drawer-content").innerHTML = `
+        <!-- Status & Premises Header -->
+        <div class="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-noc-bg border border-noc-border">
+          <div>
+            <span class="text-[11px] uppercase tracking-wider text-slate-400 block mb-1">Current Status</span>
+            ${getStatusPillHTML(item.status)}
+          </div>
+          <div class="text-right">
+            <span class="text-[11px] uppercase tracking-wider text-slate-400 block mb-1">Impacted Premises</span>
+            <span class="font-mono text-lg font-bold text-white">${Number(item.affectedPremises).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <!-- Plain-English Service Window Banner -->
+        <div class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-start gap-2.5">
+          <i class="fa-regular fa-clock text-amber-400 text-sm mt-0.5 shrink-0"></i>
+          <div>
+            <span class="block text-[10px] uppercase tracking-wider text-amber-400/90 font-semibold mb-0.5">Plain-English Service Window (${stateTimeLabel})</span>
+            <span class="font-semibold text-white">${plainWindow}</span>
+          </div>
+        </div>
+
+        <!-- Location & Infrastructure Details -->
+        <div class="space-y-3">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Geographic &amp; Network Scope</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div class="p-3 rounded-lg bg-noc-card border border-noc-border">
+              <span class="text-slate-400 block text-[11px]">State / Territory</span>
+              <span class="font-semibold text-white mt-0.5 block">${item.state} (${stateTimeLabel})</span>
+            </div>
+            <div class="p-3 rounded-lg bg-noc-card border border-noc-border">
+              <span class="text-slate-400 block text-[11px]">Access Technology</span>
+              <span class="font-mono font-semibold text-white mt-0.5 block">${item.technology}</span>
+            </div>
+            <div class="sm:col-span-2 p-3 rounded-lg bg-noc-card border border-noc-border">
+              <span class="text-slate-400 block text-[11px]">Affected Suburbs &amp; Postcodes</span>
+              <span class="font-semibold text-white mt-0.5 block">${(item.suburbs || []).join(", ")} (${(item.postcodes || []).join(", ")})</span>
+            </div>
+            <div class="sm:col-span-2 p-3 rounded-lg bg-noc-card border border-noc-border">
+              <span class="text-slate-400 block text-[11px]">POI / Headend / Exchange</span>
+              <span class="font-mono text-slate-200 mt-0.5 block">${item.poiOrExchange || "Not specified"}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Timing Grid (12-Hour Local Time) -->
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="p-3 rounded-lg bg-noc-card border border-noc-border">
+            <span class="text-slate-400 block text-[11px]">Start Time (${stateTimeLabel})</span>
+            <span class="font-semibold text-slate-100 mt-0.5 block">${startFmt.full}</span>
+          </div>
+          <div class="p-3 rounded-lg bg-noc-card border border-noc-border">
+            <span class="text-slate-400 block text-[11px]">Estimated Restoration (${stateTimeLabel})</span>
+            <span class="font-semibold text-amber-300 mt-0.5 block">${etrFmt.full}</span>
+          </div>
+        </div>
+
+        <!-- Root Cause & Impact Summary -->
+        <div class="space-y-2">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Root Cause &amp; Operational Summary</h4>
+          <div class="p-4 rounded-xl bg-noc-card border border-noc-border space-y-2 text-xs leading-relaxed">
+            <p class="font-semibold text-white">${item.cause}</p>
+            <p class="text-slate-300">${item.summary}</p>
+          </div>
+        </div>
+
+        <!-- Engineering Timeline -->
+        <div class="space-y-3">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">NOC Engineering Timeline</h4>
+          <div class="pl-2 pt-1">
+            ${updatesHTML}
+          </div>
+        </div>
+      `;
+
+      document.getElementById("detail-drawer-backdrop").classList.remove("hidden");
+      document.getElementById("detail-drawer").classList.remove("translate-x-full");
+    }
+
+    function closeDetailDrawer() {
+      document.getElementById("detail-drawer").classList.add("translate-x-full");
+      document.getElementById("detail-drawer-backdrop").classList.add("hidden");
+      state.selectedIncidentId = null;
+    }
+
+    function copyIncidentSummary() {
+      const item = state.incidents.find(i => i.id === state.selectedIncidentId);
+      if (!item) return;
+
+      const startFmt = parseAndFormat12Hour(item.startTime, item.state);
+      const etrFmt = parseAndFormat12Hour(item.etr, item.state);
+      const plainWindow = getPlainEnglishWindow(item);
+
+      const textSummary = [
+        `[${item.carrier} NETWORK NOTICE - ${item.id}]`,
+        `Status: ${item.status}`,
+        `Location: ${(item.suburbs || []).join(", ")} (${item.state} ${(item.postcodes || []).join(", ")})`,
+        `Service Window: ${plainWindow}`,
+        `Technology: ${item.technology} | POI/Node: ${item.poiOrExchange || "N/A"}`,
+        `Start Time: ${startFmt.full}`,
+        `Estimated Restoration: ${etrFmt.full}`,
+        `Cause: ${item.cause}`,
+        `Summary: ${item.summary}`
+      ].join("\n");
+
+      copyTextToClipboard(textSummary);
+      showToast(`Copied 12-hour ticket summary for ${item.id} to clipboard.`, "success");
+    }
+
+    // =========================================================================
+    // 10. DATA FEED CONFIGURATION MODAL & LIVE INGESTION
+    // =========================================================================
+    function openFeedModal() {
+      document.getElementById("feed-modal-backdrop").classList.remove("hidden");
+      document.getElementById("feed-modal").classList.remove("hidden");
+    }
+
+    function closeFeedModal() {
+      document.getElementById("feed-modal-backdrop").classList.add("hidden");
+      document.getElementById("feed-modal").classList.add("hidden");
+    }
+
+    async function connectRemoteFeed() {
+      const urlInput = document.getElementById("remote-json-url").value.trim();
+      const feedback = document.getElementById("remote-url-feedback");
+
+      if (!urlInput) {
+        feedback.textContent = "Please enter a valid HTTPS URL pointing to a JSON array.";
+        feedback.className = "text-rose-400";
+        return;
+      }
+
+      try {
+        feedback.textContent = "Connecting and validating JSON schema...";
+        feedback.className = "text-amber-300";
+
+        const res = await fetch(urlInput, { cache: "no-store" });
+        if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
+        const data = await res.json();
+
+        if (!Array.isArray(data) || data.length === 0) {
+          throw new Error("JSON must be a non-empty array of incident objects.");
+        }
+
+        state.remoteFeedUrl = urlInput;
+        state.incidents = data;
+        state.feedSourceName = new URL(urlInput).hostname;
+
+        document.getElementById("feed-source-label").textContent = state.feedSourceName;
+        document.getElementById("sidebar-endpoint-status").innerHTML = `<i class="fa-solid fa-circle-check"></i> Connected (${state.feedSourceName})`;
+        feedback.textContent = `Connected! Loaded ${data.length} incidents. Auto-sync set to 60m.`;
+        feedback.className = "text-emerald-400";
+
+        updateLastUpdatedTimestamp();
+        renderDashboard();
+        showToast(`Connected to ${state.feedSourceName} (${data.length} records).`, "success");
+      } catch (err) {
+        feedback.textContent = `Error: ${err.message}`;
+        feedback.className = "text-rose-400";
+        showToast(`Connection failed: ${err.message}`, "error");
+      }
+    }
+
+    function revertToBuiltInData() {
+      state.remoteFeedUrl = "";
+      state.incidents = [...BUILT_IN_INCIDENTS];
+      state.feedSourceName = "Built-in NOC Dataset";
+      document.getElementById("remote-json-url").value = "";
+      document.getElementById("feed-source-label").textContent = state.feedSourceName;
+      document.getElementById("sidebar-endpoint-status").innerHTML = `<i class="fa-solid fa-circle-check"></i> Ready (Simulated Live)`;
+      document.getElementById("remote-url-feedback").textContent = "Reverted to built-in realistic Australian dataset.";
+      document.getElementById("remote-url-feedback").className = "text-slate-400";
+      updateLastUpdatedTimestamp();
+      renderDashboard();
+      showToast("Restored built-in 14-incident NOC dataset.", "info");
+    }
+
+    function loadSampleSnippetIntoTextarea() {
+      const sample = [
+        {
+          id: "OPT-2026-9901",
+          carrier: "Opticomm",
+          status: "Unplanned Outage",
+          state: "WA",
+          suburbs: ["Balga", "Mirrabooka"],
+          postcodes: ["6061"],
+          technology: "Opticomm Fibre",
+          poiOrExchange: "PER-MIR-OLT01",
+          cause: "Live test ingestion: Distribution splice closure fault",
+          summary: "Simulated live JSON feed test incident for Balga / Mirrabooka.",
+          startTime: "2026-11-21 1:00 AM AWST",
+          etr: "2026-11-21 3:00 AM AWST",
+          affectedPremises: 340,
+          updates: [
+            { time: "1:35 AM AWST", note: "Ingested via custom JSON payload test." }
+          ]
+        },
+        ...BUILT_IN_INCIDENTS.slice(0, 4)
+      ];
+      document.getElementById("custom-json-paste").value = JSON.stringify(sample, null, 2);
+    }
+
+    function ingestPastedJson() {
+      const raw = document.getElementById("custom-json-paste").value.trim();
+      if (!raw) {
+        showToast("Paste a valid JSON array first.", "error");
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          throw new Error("Root JSON must be a non-empty array.");
+        }
+        state.remoteFeedUrl = "";
+        state.incidents = parsed;
+        state.feedSourceName = "Custom JSON Payload";
+        document.getElementById("feed-source-label").textContent = state.feedSourceName;
+        document.getElementById("sidebar-endpoint-status").innerHTML = `<i class="fa-solid fa-circle-check"></i> Custom JSON Loaded`;
+        updateLastUpdatedTimestamp();
+        renderDashboard();
+        closeFeedModal();
+        showToast(`Successfully ingested ${parsed.length} incidents from JSON.`, "success");
+      } catch (err) {
+        showToast(`Invalid JSON: ${err.message}`, "error");
+      }
+    }
+
+    function copySchemaSnippet() {
+      const schemaText = document.getElementById("schema-preview").textContent;
+      copyTextToClipboard(schemaText);
+      showToast("JSON schema copied to clipboard.", "success");
+    }
+
+    // =========================================================================
+    // 11. UTILITY: IFRAME-SAFE CLIPBOARD & TOAST NOTIFICATIONS
+    // =========================================================================
+    function copyTextToClipboard(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+      } catch (err) {
+        console.error("Clipboard copy failed", err);
+      }
+      document.body.removeChild(textarea);
+    }
+
+    function showToast(message, type = "info") {
+      const container = document.getElementById("toast-container");
+      const toast = document.createElement("div");
+
+      const styles = {
+        success: "bg-emerald-950/95 border-emerald-500/50 text-emerald-200",
+        error: "bg-rose-950/95 border-rose-500/50 text-rose-200",
+        info: "bg-slate-900/95 border-indigo-500/50 text-slate-200"
+      };
+
+      const icons = {
+        success: "fa-circle-check text-emerald-400",
+        error: "fa-circle-exclamation text-rose-400",
+        info: "fa-circle-info text-indigo-400"
+      };
+
+      toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-xl text-xs font-medium backdrop-blur-md transition-all duration-300 ${styles[type] || styles.info}`;
+      toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i><span>${message}</span>`;
+
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(8px)";
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+  </script>
+</body>
+</html>
