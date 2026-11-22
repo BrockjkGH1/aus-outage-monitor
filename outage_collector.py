@@ -225,7 +225,7 @@ def infer_state(raw_state: str, postcodes: List[str], location_hint: str = "") -
         if place in hint_lower:
             return st
 
-    return "NSW"
+    return "NAT"
 
 
 def parse_timestamp_utc(raw_ts: str, state_code: str) -> Optional[datetime]:
