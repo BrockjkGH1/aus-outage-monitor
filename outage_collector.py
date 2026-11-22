@@ -458,14 +458,14 @@ def parse_aussie_bb_status(html_text: str) -> List[Dict[str, Any]]:
     CVC/POI and Opticomm network events with suburb/POI names and 12h windows.
     """
     records: List[Dict[str, Any]] = []
-    now_awst = datetime.now(ZoneInfo("Australia/Perth"))
-    now_str = now_awst.strftime("%I:%M %p AWST").lstrip("0")
-    current_year = now_awst.year
-
-    # Strip Markdown formatting markers (#, *, _, >) while keeping clean lines
+    # Strip Markdown formatting markers (#, *, _, >) and [Link Text](url) wrappers
     raw_lines = strip_html_to_lines(html_text)
-    lines = [re.sub(r"^[#>*\-•\s]+|\*+", "", ln).strip() for ln in raw_lines]
-    lines = [ln for ln in lines if ln]
+    lines = []
+    for ln in raw_lines:
+        no_links = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", ln)
+        cleaned = re.sub(r"^[#>*\-•\s]+|\*+", "", no_links).strip()
+        if cleaned:
+            lines.append(cleaned)
 
     in_active_section = False
     block_lines: List[str] = []
@@ -672,50 +672,6 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
             "affectedPremises": 0,
             "updates": updates_list,
         })
-
-    return records
-
-
-def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
-    """
-    Parses Launtel's live Outages & Announcements page for active NBN,
-    Opticomm, and Redtrain incidents.
-    """
-    records: List[Dict[str, Any]] = []
-    lines = strip_html_to_lines(html_text)
-    now_str = datetime.now(ZoneInfo("Australia/Perth")).strftime("%I:%M %p AWST").lstrip("0")
-
-    in_active = False
-    for idx, line in enumerate(lines):
-        low = line.lower()
-        if "current outages" in low or "upcoming maintenance" in low:
-            in_active = True
-            continue
-        if "recent outages" in low:
-            break
-        if not in_active or "no current outages" in low or "no upcoming maintenance" in low:
-            continue
-
-        if any(k in low for k in ("nbn", "opticomm", "redtrain", "outage", "maintenance")):
-            carrier = "Opticomm" if ("opticomm" in low or "redtrain" in low) else "NBN"
-            state_code = infer_state("", [], line)
-            status = normalize_status(line)
-            records.append({
-                "id": f"LAU-{idx:03d}",
-                "carrier": carrier,
-                "status": status,
-                "state": state_code,
-                "suburbs": [line[:60]],
-                "postcodes": ["RSP-FEED"],
-                "technology": "Opticomm Fibre" if carrier == "Opticomm" else "NBN Multi-Tech",
-                "poiOrExchange": "Launtel Upstream Feed",
-                "cause": line,
-                "summary": f"Active alert reported on Launtel NOC status board: {line}",
-                "startTime": now_str,
-                "etr": "To Be Confirmed",
-                "affectedPremises": 0,
-                "updates": [{"time": now_str, "note": "Synchronized from Launtel Outages & Announcements."}],
-            })
 
     return records
 
