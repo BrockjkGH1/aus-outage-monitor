@@ -3,9 +3,10 @@
 NBN & Opticomm Hourly Outage Collector
 --------------------------------------
 Fetches official ACMA Major & Significant Local Outage registers (and optional
-RSP JSON status feeds), filters out stale resolved archive entries older than
-24 hours, normalizes all timestamps into plain 12-hour AM/PM local Australian
-state times, sorts active incidents to the top, and exports:
+RSP JSON status feeds), filters out stale/closed historical archive entries
+older than 24 hours, normalizes split date/time columns into plain 12-hour
+AM/PM local Australian state times, sorts active incidents to the top, and
+exports:
   1. outages.json              -> Consumed by nbn_opticomm_outage_dashboard.html
   2. outages_gem_knowledge.csv -> Linked/uploaded to a custom Gemini Gem
 
@@ -32,8 +33,7 @@ OUTPUT_JSON_PATH = os.getenv("OUTAGE_JSON_PATH", "outages.json")
 OUTPUT_CSV_PATH = os.getenv("OUTAGE_CSV_PATH", "outages_gem_knowledge.csv")
 POLL_INTERVAL_SECONDS = 3600  # 1 hour (60 minutes)
 
-# Automatically discard Resolved incidents older than this many hours so the
-# dashboard stays focused on live active faults and today's restorations.
+# Automatically discard Resolved / past-end-date incidents older than this many hours
 MAX_RESOLVED_AGE_HOURS = int(os.getenv("MAX_RESOLVED_AGE_HOURS", "24"))
 
 # Official ACMA Outage Register pages & direct CSV API endpoints
@@ -99,7 +99,6 @@ def discover_csv_url(page_url: str) -> Optional[str]:
         print(f"[WARN] Could not fetch register page {page_url}: {exc}")
         return None
 
-    # Look for href="...something.csv..." or /api/network/register/?format=csv
     matches = re.findall(
         r'href=["\']([^"\']*(?:\.csv|format=csv)[^"\']*)["\']',
         html,
@@ -141,7 +140,7 @@ def infer_state(raw_state: str, postcodes: List[str]) -> str:
 
 
 def parse_timestamp_utc(raw_ts: str, state_code: str) -> Optional[datetime]:
-    """Parses ISO-8601 or Australian CSV date strings into a UTC datetime object."""
+    """Parses ISO-8601 or Australian CSV date/time strings into a UTC datetime."""
     if not raw_ts or not raw_ts.strip():
         return None
 
@@ -161,8 +160,11 @@ def parse_timestamp_utc(raw_ts: str, state_code: str) -> Optional[datetime]:
     patterns = [
         "%d/%m/%Y %H:%M",
         "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %I:%M %p",
+        "%d/%m/%Y %I:%M:%S %p",
         "%Y-%m-%d %H:%M",
         "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %I:%M %p",
         "%d-%m-%Y %H:%M",
         "%d/%m/%Y",
         "%Y-%m-%d",
@@ -196,7 +198,6 @@ def format_12h_local(raw_ts: str, state_code: str) -> str:
         hour_12 = dt.strftime("%I").lstrip("0") or "12"
         return f"{dt.strftime('%Y-%m-%d')} {hour_12}:{dt.strftime('%M %p')} {tz_abbr}"
 
-    # Return cleaned original if already human-readable (e.g., "Restored 1:40 PM ACDT")
     return text
 
 
@@ -226,10 +227,9 @@ def split_list_field(raw_val: str) -> List[str]:
 def parse_acma_csv(csv_text: str, carrier_name: str) -> List[Dict[str, Any]]:
     """
     Normalizes rows from NBN or Opticomm ACMA outage register CSVs into the
-    exact schema expected by nbn_opticomm_outage_dashboard.html, filtering out
-    old resolved archive rows older than MAX_RESOLVED_AGE_HOURS.
+    exact schema expected by nbn_opticomm_outage_dashboard.html, handling
+    separate date/time columns and filtering out old resolved rows.
     """
-    # Strip UTF-8 BOM if present
     csv_text = csv_text.lstrip("\ufeff")
     reader = csv.DictReader(io.StringIO(csv_text))
     incidents: List[Dict[str, Any]] = []
@@ -238,7 +238,6 @@ def parse_acma_csv(csv_text: str, carrier_name: str) -> List[Dict[str, Any]]:
     now_str = now_utc.astimezone(ZoneInfo("Australia/Perth")).strftime("%I:%M %p AWST").lstrip("0")
 
     for idx, row in enumerate(reader, start=1):
-        # Case-insensitive column lookup helper
         lower_row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
 
         def pick(*candidate_keys: str) -> str:
@@ -250,43 +249,62 @@ def parse_acma_csv(csv_text: str, carrier_name: str) -> List[Dict[str, Any]]:
 
         raw_id = pick("reference", "incident", "outage id", "ticket", "id") or f"{carrier_name.upper()}-{idx:04d}"
         raw_title = pick("outage title", "title")
-        raw_suburbs = pick("suburb", "town", "locality", "affected locations", "location", "area")
-        raw_postcodes = pick("postcode", "post code", "affected postcodes", "zip")
-        raw_state = pick("state", "territory", "affected states", "jurisdiction")
-        raw_tech = pick("technology", "service type", "network", "access") or (
+        raw_suburbs = pick("affected suburb", "suburb", "town", "locality", "affected locations", "location", "area")
+        raw_postcodes = pick("affected postcode", "postcode", "post code", "zip")
+        raw_state = pick("affected state", "state", "territory", "jurisdiction")
+        raw_tech = pick("service type", "technology", "network", "access") or (
             "Opticomm Fibre" if carrier_name == "Opticomm" else "NBN Multi-Tech"
         )
-        raw_rectified = pick("rectified", "date last rectified", "resolved date", "restored date")
+        raw_rectified = pick("date last rectified", "rectified", "resolved date", "restored date")
         raw_status = pick("status", "state of outage", "outage type", "type")
         raw_cause = pick("cause", "reason", "description", "details") or raw_title or "Carrier network fault under investigation."
-        raw_start = pick("start", "commenced", "detected", "created", "date")
-        raw_etr = raw_rectified or pick("restoration", "etr", "estimated", "end")
         raw_poi = pick("poi", "exchange", "headend", "node", "csa") or (raw_title if raw_title else "ACMA Register Feed")
-        raw_premises = pick("premises", "services", "customers", "impacted", "affected services")
+        raw_premises = pick("premises affected", "services affected", "premises", "services", "customers", "impacted")
+
+        # Handle ACMA split date + time columns (e.g., "Start date of outage" + "Start time of outage")
+        start_date_col = pick("start date of outage", "start date", "commenced date")
+        start_time_col = pick("start time of outage", "start time", "commenced time")
+        if start_date_col and start_time_col and start_time_col not in start_date_col:
+            raw_start = f"{start_date_col} {start_time_col}"
+        else:
+            raw_start = start_date_col or pick("start", "commenced", "detected", "created", "date")
+
+        end_date_col = pick("end date of outage", "end date", "estimated end date")
+        end_time_col = pick("end time of outage", "end time", "estimated end time")
+        if end_date_col and end_time_col and end_time_col not in end_date_col:
+            raw_end = f"{end_date_col} {end_time_col}"
+        else:
+            raw_end = end_date_col or pick("restoration", "etr", "estimated", "end")
 
         suburbs = split_list_field(raw_suburbs) or ["Suburb Details Pending"]
         postcodes = split_list_field(raw_postcodes) or ["0000"]
         state_code = infer_state(raw_state, postcodes)
 
-        # Parse numeric premises count safely
         premises_digits = re.sub(r"\D", "", raw_premises)
         affected_premises = int(premises_digits) if premises_digits else 0
 
-        status = "Resolved" if raw_rectified else normalize_status(raw_status)
+        start_dt_utc = parse_timestamp_utc(raw_start, state_code)
+        end_dt_utc = parse_timestamp_utc(raw_end, state_code)
+        rectified_dt_utc = parse_timestamp_utc(raw_rectified, state_code)
 
-        # Skip stale resolved historical records older than MAX_RESOLVED_AGE_HOURS
+        # Determine true status: ACMA registers populate "Date last rectified" OR a past "End date of outage" once closed
+        if raw_rectified or (end_dt_utc is not None and end_dt_utc < now_utc):
+            status = "Resolved"
+        else:
+            status = normalize_status(raw_status)
+
+        # Filter out historical/closed archive records older than MAX_RESOLVED_AGE_HOURS
         if status == "Resolved":
-            resolved_dt = parse_timestamp_utc(raw_rectified or raw_etr or raw_start, state_code)
-            if resolved_dt is not None and resolved_dt < cutoff_utc:
+            closed_ref_dt = rectified_dt_utc or end_dt_utc or start_dt_utc
+            if closed_ref_dt is not None and closed_ref_dt < cutoff_utc:
                 continue
 
-        start_dt_utc = parse_timestamp_utc(raw_start, state_code)
         start_12h = format_12h_local(raw_start, state_code)
-        etr_12h = (
-            f"Restored {format_12h_local(raw_rectified, state_code)}"
-            if raw_rectified
-            else format_12h_local(raw_etr, state_code)
-        )
+        if status == "Resolved":
+            resolved_ts_str = raw_rectified or raw_end
+            etr_12h = f"Restored {format_12h_local(resolved_ts_str, state_code)}"
+        else:
+            etr_12h = format_12h_local(raw_end, state_code)
 
         incidents.append({
             "id": raw_id,
@@ -332,7 +350,7 @@ def collect_all_outages() -> List[Dict[str, Any]]:
     else:
         print("[WARN] No NBN CSV link discovered on register page.")
 
-    # 2. Fetch Opticomm ACMA Register CSV (direct API endpoint with HTML fallback)
+    # 2. Fetch Opticomm ACMA Register CSV
     opti_csv_url = (
         os.getenv("OPTICOMM_CSV_OVERRIDE_URL")
         or OPTICOMM_CSV_DIRECT_URL
@@ -378,7 +396,6 @@ def collect_all_outages() -> List[Dict[str, Any]]:
         key=lambda r: (status_priority.get(r.get("status", ""), 9), -r.get("_sortTs", 0.0))
     )
 
-    # Strip internal sorting key before exporting JSON
     for rec in sorted_records:
         rec.pop("_sortTs", None)
 
