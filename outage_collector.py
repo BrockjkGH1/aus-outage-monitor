@@ -58,7 +58,11 @@ SOURCES = {
         "OPTICOMM_REGISTER_URL",
         "https://www.opticomm.com.au/outages/register/"
     ),
-    "opticomm_direct_csv": os.getenv("OPTICOMM_DIRECT_CSV_URL", ""),
+    # Direct Opticomm ACMA Register CSV API endpoint
+    "opticomm_direct_csv": os.getenv(
+        "OPTICOMM_DIRECT_CSV_URL",
+        "https://www.opticomm.com.au/api/network/register/?format=csv"
+    ),
     # Optional: Add any public RSP status JSON feed URL here
     "optional_rsp_json": os.getenv("RSP_STATUS_JSON_URL", "")
 }
@@ -266,11 +270,35 @@ def parse_acma_csv(csv_text: str, carrier_name: str) -> List[Dict[str, Any]]:
             return ""
 
         raw_id = pick("reference", "incident", "outage id", "ticket", "id") or f"{carrier_name.upper()}-{idx:04d}"
-        raw_suburbs = pick("suburb", "town", "locality", "area", "location")
-        raw_postcodes = pick("postcode", "post code", "zip")
-        raw_state = pick("state", "territory", "jurisdiction")
+        raw_title = pick("outage title", "title")
+        raw_suburbs = pick("suburb", "town", "locality", "affected locations", "location", "area")
+        raw_postcodes = pick("postcode", "post code", "affected postcodes", "zip")
+        raw_state = pick("state", "territory", "affected states", "jurisdiction")
         raw_tech = pick("technology", "service type", "network", "access") or (
             "Opticomm Fibre" if carrier_name == "Opticomm" else "NBN Multi-Tech"
+        )
+        raw_rectified = pick("rectified", "date last rectified", "resolved date")
+        raw_status = pick("status", "state of outage", "outage type", "type")
+        raw_cause = pick("cause", "reason", "description", "details") or raw_title or "Carrier network fault under investigation."
+        raw_start = pick("start", "commenced", "detected", "created", "date")
+        raw_etr = raw_rectified or pick("restoration", "etr", "estimated", "end")
+        raw_poi = pick("poi", "exchange", "headend", "node", "csa") or (raw_title if raw_title else "ACMA Register Feed")
+        raw_premises = pick("premises", "services", "customers", "impacted", "affected services")
+
+        suburbs = split_list_field(raw_suburbs) or ["Suburb Details Pending"]
+        postcodes = split_list_field(raw_postcodes) or ["0000"]
+        state_code = infer_state(raw_state, postcodes)
+
+        # Parse numeric premises count safely
+        premises_digits = re.sub(r"\D", "", raw_premises)
+        affected_premises = int(premises_digits) if premises_digits else 0
+
+        status = "Resolved" if raw_rectified else normalize_status(raw_status)
+        start_12h = format_12h_local(raw_start, state_code)
+        etr_12h = (
+            f"Restored {format_12h_local(raw_rectified, state_code)}"
+            if raw_rectified
+            else format_12h_local(raw_etr, state_code)
         )
         raw_status = pick("status", "state of outage", "type")
         raw_cause = pick("cause", "reason", "description", "details") or "Carrier network fault under investigation."
