@@ -1,0 +1,32 @@
+name: Hourly NBN & Opticomm Outage Sync
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Runs automatically every hour
+  workflow_dispatch:    # Allows you to click "Run" manually anytime
+
+permissions:
+  contents: write
+
+jobs:
+  update-outages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Outage Collector
+        run: python3 outage_collector.py
+
+      - name: Save updated outages.json and CSV
+        run: |
+          git config user.name "Outage Sync Bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add outages.json outages_gem_knowledge.csv
+          git commit -m "Hourly outage data refresh" || exit 0
+          git push
