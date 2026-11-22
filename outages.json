@@ -1,9 +1,9 @@
 [
   {
-    "id": "LAU-053",
+    "id": "LAU-054",
     "carrier": "Opticomm",
     "status": "Unplanned Outage",
-    "state": "NSW",
+    "state": "NAT",
     "suburbs": [
       "We've been made aware of an outage affecting customers on Re"
     ],
@@ -14,21 +14,21 @@
     "poiOrExchange": "Launtel Upstream Feed",
     "cause": "We've been made aware of an outage affecting customers on Redtrain services in Fraser Rise; we're raising a ticket with Redtrain and awaiting further details. We'll provide updates as soon as we can.",
     "summary": "Active alert reported on Launtel NOC status board: We've been made aware of an outage affecting customers on Redtrain services in Fraser Rise; we're raising a ticket with Redtrain and awaiting further details. We'll provide updates as soon as we can.",
-    "startTime": "5:48 PM AWST",
+    "startTime": "5:55 PM AWST",
     "etr": "To Be Confirmed",
     "affectedPremises": 0,
     "updates": [
       {
-        "time": "5:48 PM AWST",
+        "time": "5:55 PM AWST",
         "note": "Synchronized from Launtel Outages & Announcements."
       }
     ]
   },
   {
-    "id": "LAU-056",
+    "id": "LAU-057",
     "carrier": "Opticomm",
     "status": "Unplanned Outage",
-    "state": "NSW",
+    "state": "NAT",
     "suburbs": [
       "22 Nov 10:13 AEDT — Redtrain have acknowledged the outage an"
     ],
@@ -39,21 +39,21 @@
     "poiOrExchange": "Launtel Upstream Feed",
     "cause": "22 Nov 10:13 AEDT — Redtrain have acknowledged the outage and advised they'll be sending a technician to investigate. There is no current ETR.",
     "summary": "Active alert reported on Launtel NOC status board: 22 Nov 10:13 AEDT — Redtrain have acknowledged the outage and advised they'll be sending a technician to investigate. There is no current ETR.",
-    "startTime": "5:48 PM AWST",
+    "startTime": "5:55 PM AWST",
     "etr": "To Be Confirmed",
     "affectedPremises": 0,
     "updates": [
       {
-        "time": "5:48 PM AWST",
+        "time": "5:55 PM AWST",
         "note": "Synchronized from Launtel Outages & Announcements."
       }
     ]
   },
   {
-    "id": "LAU-057",
+    "id": "LAU-058",
     "carrier": "NBN",
     "status": "Unplanned Outage",
-    "state": "NSW",
+    "state": "NAT",
     "suburbs": [
       "22 Nov 09:47 AEDT — Outage detected."
     ],
@@ -64,21 +64,21 @@
     "poiOrExchange": "Launtel Upstream Feed",
     "cause": "22 Nov 09:47 AEDT — Outage detected.",
     "summary": "Active alert reported on Launtel NOC status board: 22 Nov 09:47 AEDT — Outage detected.",
-    "startTime": "5:48 PM AWST",
+    "startTime": "5:55 PM AWST",
     "etr": "To Be Confirmed",
     "affectedPremises": 0,
     "updates": [
       {
-        "time": "5:48 PM AWST",
+        "time": "5:55 PM AWST",
         "note": "Synchronized from Launtel Outages & Announcements."
       }
     ]
   },
   {
-    "id": "LAU-050",
+    "id": "LAU-051",
     "carrier": "Opticomm",
     "status": "Planned Maintenance",
-    "state": "NSW",
+    "state": "NAT",
     "suburbs": [
       "### [Redtrain] Unplanned Outage - Fraser Rise"
     ],
@@ -89,21 +89,21 @@
     "poiOrExchange": "Launtel Upstream Feed",
     "cause": "### [Redtrain] Unplanned Outage - Fraser Rise",
     "summary": "Active alert reported on Launtel NOC status board: ### [Redtrain] Unplanned Outage - Fraser Rise",
-    "startTime": "5:48 PM AWST",
+    "startTime": "5:55 PM AWST",
     "etr": "To Be Confirmed",
     "affectedPremises": 0,
     "updates": [
       {
-        "time": "5:48 PM AWST",
+        "time": "5:55 PM AWST",
         "note": "Synchronized from Launtel Outages & Announcements."
       }
     ]
   },
   {
-    "id": "LAU-052",
+    "id": "LAU-053",
     "carrier": "NBN",
     "status": "Planned Maintenance",
-    "state": "NSW",
+    "state": "NAT",
     "suburbs": [
       "Unplanned outage in progress since Sun 22 Nov 09:46 AEDT. Re"
     ],
@@ -114,12 +114,12 @@
     "poiOrExchange": "Launtel Upstream Feed",
     "cause": "Unplanned outage in progress since Sun 22 Nov 09:46 AEDT. Restoration time to be advised. Expected impact: services are completely interrupted.",
     "summary": "Active alert reported on Launtel NOC status board: Unplanned outage in progress since Sun 22 Nov 09:46 AEDT. Restoration time to be advised. Expected impact: services are completely interrupted.",
-    "startTime": "5:48 PM AWST",
+    "startTime": "5:55 PM AWST",
     "etr": "To Be Confirmed",
     "affectedPremises": 0,
     "updates": [
       {
-        "time": "5:48 PM AWST",
+        "time": "5:55 PM AWST",
         "note": "Synchronized from Launtel Outages & Announcements."
       }
     ]
