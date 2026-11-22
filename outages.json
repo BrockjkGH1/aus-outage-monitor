@@ -19,6 +19,10 @@
     "affectedPremises": 0,
     "updates": [
       {
+        "time": "2026-11-23 7:50 AM AEDT",
+        "note": "Technicians from the backhaul provider have been on site, and their fibre team is now organising repair works. The backhaul provider hasn't given an estimated time for restoration yet, but we'll share updates as soon as they're available"
+      },
+      {
         "time": "2026-11-22 3:34 PM AEDT",
         "note": "Technician has attended and advised there's a break in the fibre, they're lodging a fault with their backhaul provider to get this break fixed as soon as possible. There is currently no ETR, but we expect an update once the backhaul provider accepts the ticket."
       },
