@@ -191,7 +191,7 @@ def discover_csv_url(page_url: str) -> Optional[str]:
 
 
 def infer_state(raw_state: str, postcodes: List[str], location_hint: str = "") -> str:
-    """Normalizes Australian state/territory code or infers it from postcode/suburb."""
+    """Normalizes Australian state/territory code or infers it from postcode/suburb/POI."""
     cleaned = (raw_state or "").strip().upper()
     aliases = {
         "WESTERN AUSTRALIA": "WA",
@@ -217,6 +217,10 @@ def infer_state(raw_state: str, postcodes: List[str], location_hint: str = "") -
                     return st
 
     hint_lower = f"{raw_state} {location_hint}".lower()
+    for full_name, st in aliases.items():
+        if full_name.lower() in hint_lower:
+            return st
+
     for state_abbr in STATE_TIMEZONES:
         if re.search(rf"\b{state_abbr.lower()}\b", hint_lower):
             return state_abbr
@@ -224,6 +228,12 @@ def infer_state(raw_state: str, postcodes: List[str], location_hint: str = "") -
     for place, st in KNOWN_POI_STATES.items():
         if place in hint_lower:
             return st
+
+    # Infer state from standard NBN POI / CSA prefix (e.g. 6BAL-01 -> 6 = WA, 3WEE -> 3 = VIC)
+    poi_match = re.search(r"\b([2-8])[A-Z]{3}(?:-\d{2})?\b", f"{raw_state} {location_hint}")
+    if poi_match:
+        poi_digit_map = {"2": "NSW", "3": "VIC", "4": "QLD", "5": "SA", "6": "WA", "7": "TAS", "8": "NT"}
+        return poi_digit_map.get(poi_match.group(1), "NAT")
 
     return "NAT"
 
@@ -683,20 +693,23 @@ def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str
         name = str(ev.get("name") or "")
         updates_list = ev.get("incident_updates") or []
         latest_body = str(updates_list[0].get("body") if updates_list else "")
-        combined = f"{name} {latest_body}".lower()
+        comp_names = [str(c.get("name") or "") for c in (ev.get("components") or []) if isinstance(c, dict)]
+        comp_str = ", ".join(comp_names)
+        full_text = f"{name} {comp_str} {latest_body}"
+        combined = full_text.lower()
 
         # Focus on NBN, Opticomm, or regional/metro backhaul faults
         if not any(k in combined for k in ("nbn", "opticomm", "poi", "cvc", "fibre", "fttp", "fttn", "hfc", "outage", "maintenance")):
             continue
 
         carrier = "Opticomm" if "opticomm" in combined else "NBN"
-        postcodes = re.findall(r"\b(\d{4})\b", f"{name} {latest_body}")
-        state_code = infer_state("", postcodes, f"{name} {latest_body}")
+        postcodes = re.findall(r"\b(\d{4})\b", full_text)
+        state_code = infer_state("", postcodes, full_text)
         status = "Planned Maintenance" if kind == "maintenance" else normalize_status(str(ev.get("status") or name))
 
-        # Extract suburb/POI names from title
+        # Extract suburb/POI names from title or affected components
         suburb_hint = re.sub(r"^(?:NBN|Opticomm)\s*[-:]\s*", "", name, flags=re.IGNORECASE).strip()
-        suburbs = [suburb_hint[:65]] if suburb_hint else ["Metro / Regional POI"]
+        suburbs = comp_names[:4] if comp_names else ([suburb_hint[:65]] if suburb_hint else ["Metro / Regional POI"])
 
         start_raw = str(ev.get("scheduled_for") or ev.get("started_at") or ev.get("created_at") or "")
         end_raw = str(ev.get("scheduled_until") or "")
@@ -719,7 +732,7 @@ def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str
             "suburbs": suburbs,
             "postcodes": list(dict.fromkeys(postcodes)) or ["RSP-API"],
             "technology": "Opticomm Fibre" if carrier == "Opticomm" else "NBN Multi-Tech",
-            "poiOrExchange": f"{rsp_name} Status Feed",
+            "poiOrExchange": comp_str or f"{rsp_name} Status Feed",
             "cause": name,
             "summary": latest_body[:260] if latest_body else name,
             "startTime": format_12h_local(start_raw, state_code) if start_raw else now_str,
