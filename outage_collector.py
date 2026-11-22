@@ -144,6 +144,13 @@ def discover_csv_url(page_url: str) -> Optional[str]:
     matches = re.findall(
         r'href=["\']([^"\']*(?:\.csv|format=csv)[^"\']*)["\']',
         html,
+        flags=re.IGNORECASE,
+    )
+    if not matches:
+        return None
+    return urllib.parse.urljoin(page_url, matches[0])
+
+
 def infer_state(raw_state: str, postcodes: List[str], location_hint: str = "") -> str:
     """Normalizes Australian state/territory code or infers it from postcode/suburb."""
     cleaned = (raw_state or "").strip().upper()
