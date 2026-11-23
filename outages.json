@@ -19,6 +19,10 @@
     "affectedPremises": 0,
     "updates": [
       {
+        "time": "2026-11-23 11:14 AM AEDT",
+        "note": "The backhaul provider has localised the fault, and the issue has been escalated for urgent remediation."
+      },
+      {
         "time": "2026-11-23 7:50 AM AEDT",
         "note": "Technicians from the backhaul provider have been on site, and their fibre team is now organising repair works. The backhaul provider hasn't given an estimated time for restoration yet, but we'll share updates as soon as they're available"
       },
