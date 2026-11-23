@@ -19,6 +19,10 @@
     "affectedPremises": 0,
     "updates": [
       {
+        "time": "2026-11-23 1:13 PM AEDT",
+        "note": "The backhaul provider has engaged a civil contractor to clear a duct blockage and re-haul new fibre. Following this, the backhaul provider's team will attend the site in the afternoon and begin to restore services."
+      },
+      {
         "time": "2026-11-23 11:14 AM AEDT",
         "note": "The backhaul provider has localised the fault, and the issue has been escalated for urgent remediation."
       },
