@@ -1,2 +1,3 @@
 id,carrier,status,state,suburbs,postcodes,technology,poiOrExchange,startTime,etr,affectedPremises,cause
-LAU-1124-01,Opticomm,Planned Maintenance,VIC,Fraser Rise,3336,Opticomm / Redtrain Fibre,Launtel NOC Status Board,2026-11-22 9:46 AM AEDT,To Be Confirmed,0,[Redtrain] Unplanned Outage - Fraser Rise
+LAU-1124-01,Opticomm,Unplanned Outage,VIC,Keilor East Emergency Outage,3042; 2026; 2026,Opticomm / Redtrain Fibre,Launtel NOC Status Board,2026-11-24 2:00 PM AEDT,To Be Confirmed,0,Keilor East Emergency Outage
+LAU-1124-02,Opticomm,Planned Maintenance,VIC,Fraser Rise,3336,Opticomm / Redtrain Fibre,Launtel NOC Status Board,2026-11-22 9:46 AM AEDT,To Be Confirmed,0,[Redtrain] Unplanned Outage - Fraser Rise
