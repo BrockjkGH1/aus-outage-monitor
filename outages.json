@@ -2,33 +2,6 @@
   {
     "id": "LAU-1124-01",
     "carrier": "Opticomm",
-    "status": "Unplanned Outage",
-    "state": "VIC",
-    "suburbs": [
-      "Keilor East Emergency Outage"
-    ],
-    "postcodes": [
-      "3042",
-      "2026",
-      "2026"
-    ],
-    "technology": "Opticomm / Redtrain Fibre",
-    "poiOrExchange": "Launtel NOC Status Board",
-    "cause": "Keilor East Emergency Outage",
-    "summary": "Redtrain sincerely apologise for any inconvenience this may cause and thank you for your understanding and patience while this essential work is carried out.",
-    "startTime": "2026-11-24 2:00 PM AEDT",
-    "etr": "To Be Confirmed",
-    "affectedPremises": 0,
-    "updates": [
-      {
-        "time": "2026-11-24 2:23 PM AEDT",
-        "note": "Outage detected."
-      }
-    ]
-  },
-  {
-    "id": "LAU-1124-02",
-    "carrier": "Opticomm",
     "status": "Planned Maintenance",
     "state": "VIC",
     "suburbs": [
