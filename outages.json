@@ -76,7 +76,7 @@
     "poiOrExchange": "Launtel NOC Status Board",
     "cause": "Planned Maintenance - 2PAR",
     "summary": "An upstream provider is performing maintenance on backhaul links that it provides to Launtel. They have advised there will be up to 90 minutes of downtime during the maintenance window.",
-    "startTime": "5:54 PM AWST",
+    "startTime": "6:42 PM AWST",
     "etr": "To Be Confirmed",
     "affectedPremises": 0,
     "updates": [
