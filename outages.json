@@ -19,6 +19,10 @@
     "affectedPremises": 0,
     "updates": [
       {
+        "time": "2026-11-24 12:22 PM AEDT",
+        "note": "Redtrain is advising that the backhaul provider closed the fault ticket, but the link is still down. Redtrain have run another OTDR test from Fraser Rise toward 530 Collins Street and confirmed the signal drop is still occurring. A new ticket has been lodged and pushed for urgent resolution."
+      },
+      {
         "time": "2026-11-23 5:55 PM AEDT",
         "note": "Please be advised that Telstra civil contractors had to excavate on-site to clear an underground conduit blockage and are now nearly finished hauling the new fibre cable. They are currently coordinating cable technicians / fibre splicers to attend and splice the new cable once the haul is completed."
       },
