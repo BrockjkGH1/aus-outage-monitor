@@ -19,6 +19,14 @@
     "affectedPremises": 0,
     "updates": [
       {
+        "time": "2026-11-24 4:53 PM AEDT",
+        "note": "Redtrain are advising that the outage has now ben resolved. They are currently awaiting for a formal update from the backhaul provider and continuing to monitor the link to ensure stability. If you still have no service, please reboot your router and Redtrain equipment, and call through to our support line."
+      },
+      {
+        "time": "2026-11-24 3:54 PM AEDT",
+        "note": "Redtrain advises that Telstra has engaged their field/fibre specialists to attend the impacted site and conduct further investigation. At this time, Telstra is currently awaiting confirmation of technician dispatch and attendance ETA. Redtrain has promised to provide a further update as soon as these details become available."
+      },
+      {
         "time": "2026-11-24 12:22 PM AEDT",
         "note": "Redtrain is advising that the backhaul provider closed the fault ticket, but the link is still down. Redtrain have run another OTDR test from Fraser Rise toward 530 Collins Street and confirmed the signal drop is still occurring. A new ticket has been lodged and pushed for urgent resolution."
       },
@@ -49,6 +57,32 @@
       {
         "time": "2026-11-22 9:47 AM AEDT",
         "note": "Outage detected."
+      }
+    ]
+  },
+  {
+    "id": "LAU-1124-02",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "NSW",
+    "suburbs": [
+      "2PAR"
+    ],
+    "postcodes": [
+      "2026",
+      "2026"
+    ],
+    "technology": "NBN Multi-Tech",
+    "poiOrExchange": "Launtel NOC Status Board",
+    "cause": "Planned Maintenance - 2PAR",
+    "summary": "An upstream provider is performing maintenance on backhaul links that it provides to Launtel. They have advised there will be up to 90 minutes of downtime during the maintenance window.",
+    "startTime": "2:48 PM AWST",
+    "etr": "To Be Confirmed",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "2026-11-13 2:00 PM AEDT",
+        "note": "This planned maintenance is being performed by one of our backhaul providers, which will impact Launtel customers. They have advised there will be up to 90 minutes of service interruption during their maintenance works."
       }
     ]
   }
