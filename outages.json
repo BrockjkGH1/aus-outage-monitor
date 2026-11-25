@@ -14,12 +14,12 @@
     "poiOrExchange": "Launtel NOC Status Board",
     "cause": "Planned Maintenance - ASNB",
     "summary": "An upstream provider is performing maintenance on backhaul links that it provides to Launtel. They have advised there will be up to 30 minutes of downtime during the maintenance window.",
-    "startTime": "2:50 PM AWST",
+    "startTime": "4:20 PM AWST",
     "etr": "To Be Confirmed",
     "affectedPremises": 0,
     "updates": [
       {
-        "time": "2:50 PM AWST",
+        "time": "4:20 PM AWST",
         "note": "Synchronized from Launtel Outages & Announcements."
       }
     ]
