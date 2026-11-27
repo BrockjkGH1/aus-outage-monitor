@@ -1,1 +1,272 @@
-[]
+[
+  {
+    "id": "ABB-1128-06",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "SA",
+    "suburbs": [
+      "Port Augusta"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Port Augusta",
+    "cause": "Network Maintenance (NBN) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Port Augusta (SA).",
+    "startTime": "2026-12-03 8:30 AM ACDT",
+    "etr": "2026-12-03 12:30 PM ACDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-09",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "VIC",
+    "suburbs": [
+      "Bendigo",
+      "Cranbourne",
+      "Footscray",
+      "Geelong",
+      "Hobart",
+      "Horsham"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Bendigo, NBN CVC: Cranbourne, NBN CVC: Footscray, NBN CVC: Geelong",
+    "cause": "Network Maintenance (NBN, NNIs) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Bendigo, Cranbourne, Footscray, Geelong, Hobart (VIC).",
+    "startTime": "2026-12-02 10:00 AM AEDT",
+    "etr": "2026-12-02 12:00 PM AEDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-05",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "SA",
+    "suburbs": [
+      "Elizabeth"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Elizabeth",
+    "cause": "Network Maintenance (NBN) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Elizabeth (SA).",
+    "startTime": "2026-12-02 8:30 AM ACDT",
+    "etr": "2026-12-02 12:30 PM ACDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-08",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "NAT",
+    "suburbs": [
+      "Asquith",
+      "Campsie",
+      "Carramar",
+      "City South",
+      "Dalley"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Asquith, NBN CVC: Campsie, NBN CVC: Carramar, NBN CVC: City South",
+    "cause": "Network Maintenance (NBN, NNIs) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Asquith, Campsie, Carramar, City South, Dalley (NAT).",
+    "startTime": "2026-12-02 8:00 AM AEDT",
+    "etr": "2026-12-02 10:00 AM AEDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-01",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "SA",
+    "suburbs": [
+      "Edwardstown"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Edwardstown",
+    "cause": "Network Maintenance (NBN) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Edwardstown (SA).",
+    "startTime": "2026-12-01 7:30 AM ACDT",
+    "etr": "2026-12-01 12:30 PM ACDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-07",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "VIC",
+    "suburbs": [
+      "Dandenong",
+      "Exhibition",
+      "Geelong",
+      "Horsham",
+      "Keysborough"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Dandenong, NBN CVC: Exhibition, NBN CVC: Geelong, NBN CVC: Horsham",
+    "cause": "Network Maintenance (NBN) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Dandenong, Exhibition, Geelong, Horsham, Keysborough (VIC).",
+    "startTime": "2026-12-01 8:00 AM AEDT",
+    "etr": "2026-12-01 10:00 AM AEDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-10",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "NSW",
+    "suburbs": [
+      "Blacktown"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Blacktown",
+    "cause": "Network Maintenance (NBN) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Blacktown (NSW).",
+    "startTime": "2026-12-01 7:00 AM AEDT",
+    "etr": "2026-12-01 12:00 PM AEDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-04",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "NAT",
+    "suburbs": [
+      "Stirling"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Stirling",
+    "cause": "Network Maintenance (NBN) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Stirling (NAT).",
+    "startTime": "2026-11-30 8:30 AM AEDT",
+    "etr": "2026-11-30 12:30 PM AEDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-02",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "VIC",
+    "suburbs": [
+      "Kings Park",
+      "Traralgon",
+      "Wheelers Hill"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Kings Park, NBN CVC: Traralgon, NBN CVC: Wheelers Hill",
+    "cause": "Network Maintenance (NBN) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Kings Park, Traralgon, Wheelers Hill (VIC).",
+    "startTime": "2026-11-29 10:00 AM AEDT",
+    "etr": "2026-11-29 12:00 PM AEDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  },
+  {
+    "id": "ABB-1128-03",
+    "carrier": "NBN",
+    "status": "Planned Maintenance",
+    "state": "NSW",
+    "suburbs": [
+      "Albury",
+      "Berkeley Vale",
+      "Campbelltown",
+      "City South",
+      "Eastern Creek",
+      "Grafton"
+    ],
+    "postcodes": [
+      "POI/CVC"
+    ],
+    "technology": "NBN CVC / POI",
+    "poiOrExchange": "NBN CVC: Albury, NBN CVC: Berkeley Vale, NBN CVC: Campbelltown, NBN CVC: City South",
+    "cause": "Network Maintenance (NBN, NNIs) — Aussie Broadband Network Schedule.",
+    "summary": "NBN CVC / POI planned maintenance affecting Albury, Berkeley Vale, Campbelltown, City South, Eastern Creek (NSW).",
+    "startTime": "2026-11-29 8:00 AM AEDT",
+    "etr": "2026-11-29 10:00 AM AEDT",
+    "affectedPremises": 0,
+    "updates": [
+      {
+        "time": "3:46 AM AWST",
+        "note": "Synchronized from Aussie Broadband Live Status Feed."
+      }
+    ]
+  }
+]
