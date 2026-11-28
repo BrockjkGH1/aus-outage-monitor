@@ -45,6 +45,9 @@ POLL_INTERVAL_SECONDS = 3600  # 1 hour (60 minutes)
 # Automatically discard Resolved / past-end-date records older than this many hours
 MAX_RESOLVED_AGE_HOURS = int(os.getenv("MAX_RESOLVED_AGE_HOURS", "24"))
 
+# Maximum days ahead to include upcoming scheduled maintenance windows
+MAX_UPCOMING_MAINTENANCE_DAYS = int(os.getenv("MAX_UPCOMING_MAINTENANCE_DAYS", "14"))
+
 # Official ACMA Outage Register pages & direct CSV API endpoints
 NBN_REGISTER_PAGE = "https://www.nbnco.com.au/utility/major-significant-local-outages-register"
 OPTICOMM_REGISTER_PAGE = "https://www.opticomm.com.au/outages/register/"
@@ -460,12 +463,17 @@ def parse_acma_csv(csv_text: str, carrier_name: str) -> List[Dict[str, Any]]:
         if raw_rectified or (end_dt_utc is not None and end_dt_utc < now_utc):
             status = "Resolved"
         else:
-            status = normalize_status(raw_status)
+            status = normalize_status(f"{raw_status} {raw_title} {raw_cause}")
 
         if status == "Resolved":
             closed_ref_dt = rectified_dt_utc or end_dt_utc or start_dt_utc
             if closed_ref_dt is not None and closed_ref_dt < cutoff_utc:
                 continue
+
+        # Label planned maintenance as either currently in-progress or upcoming
+        maint_phase = ""
+        if status == "Planned Maintenance" and start_dt_utc is not None:
+            maint_phase = "Upcoming " if start_dt_utc > now_utc else "In-Progress "
 
         start_12h = format_12h_local(raw_start, state_code)
         if status == "Resolved":
@@ -484,7 +492,7 @@ def parse_acma_csv(csv_text: str, carrier_name: str) -> List[Dict[str, Any]]:
             "technology": raw_tech,
             "poiOrExchange": raw_poi,
             "cause": raw_cause,
-            "summary": f"{carrier_name} {status.lower()} affecting {', '.join(suburbs[:4])} ({state_code}).",
+            "summary": f"{maint_phase}{carrier_name} {status.lower()} affecting {', '.join(suburbs[:4])} ({state_code}).",
             "startTime": start_12h,
             "etr": etr_12h,
             "affectedPremises": affected_premises,
@@ -621,12 +629,15 @@ def parse_aussie_bb_status(raw_text: str) -> List[Dict[str, Any]]:
             lines.append(cleaned)
 
     in_active_section = False
+    section_hint = ""
     block_lines: List[str] = []
-    blocks: List[List[str]] = []
+    blocks: List[Tuple[str, List[str]]] = []
     card_headers = (
         "network maintenance",
         "unscheduled outage",
         "planned outage",
+        "planned maintenance",
+        "scheduled maintenance",
         "degraded performance",
         "emergency maintenance",
         "service disruption",
@@ -634,12 +645,23 @@ def parse_aussie_bb_status(raw_text: str) -> List[Dict[str, Any]]:
 
     for line in lines:
         low = line.lower()
-        if low.startswith("current outages") or low.startswith("upcoming outages"):
+        if low.startswith("current outages"):
+            if block_lines:
+                blocks.append((section_hint, block_lines))
+                block_lines = []
             in_active_section = True
+            section_hint = "Current"
+            continue
+        if low.startswith("upcoming outages") or low.startswith("upcoming maintenance"):
+            if block_lines:
+                blocks.append((section_hint, block_lines))
+                block_lines = []
+            in_active_section = True
+            section_hint = "Upcoming"
             continue
         if low.startswith("past outages"):
             if block_lines:
-                blocks.append(block_lines)
+                blocks.append((section_hint, block_lines))
                 block_lines = []
             break
         if not in_active_section:
@@ -647,15 +669,17 @@ def parse_aussie_bb_status(raw_text: str) -> List[Dict[str, Any]]:
 
         if any(low == h or low.startswith(h) for h in card_headers):
             if block_lines:
-                blocks.append(block_lines)
+                blocks.append((section_hint, block_lines))
             block_lines = [line]
         elif block_lines:
             block_lines.append(line)
 
     if block_lines:
-        blocks.append(block_lines)
+        blocks.append((section_hint, block_lines))
 
-    for idx, blk in enumerate(blocks, start=1):
+    max_future_utc = now_utc + timedelta(days=MAX_UPCOMING_MAINTENANCE_DAYS)
+
+    for idx, (sec_type, blk) in enumerate(blocks, start=1):
         blk_text = " ".join(blk)
         low_text = blk_text.lower()
 
@@ -663,21 +687,28 @@ def parse_aussie_bb_status(raw_text: str) -> List[Dict[str, Any]]:
         if "mobile phones" in low_text and "nbn" not in low_text and "opticomm" not in low_text:
             continue
 
-        # Determine Services affected (often appears after "Services affected")
+        # Determine Services affected (handles both same-line and next-line labels)
         services_val = ""
         for i, ln in enumerate(blk):
-            if ln.lower().startswith("services affected") and i + 1 < len(blk):
-                services_val = blk[i + 1]
+            if ln.lower().startswith("services affected"):
+                inline_val = re.sub(r"^services affected[:\s]*", "", ln, flags=re.IGNORECASE).strip()
+                if inline_val:
+                    services_val = inline_val
+                elif i + 1 < len(blk):
+                    services_val = blk[i + 1]
                 break
 
         has_opticomm = "opticomm" in services_val.lower() or "opticomm" in low_text
         has_nbn = "nbn" in services_val.lower() or "nbn" in low_text
-        carrier = "Opticomm" if (has_opticomm and not has_nbn) else "NBN"
-        if has_opticomm and has_nbn:
-            # Dual NBN + Opticomm maintenance: tag Opticomm if Opticomm is explicitly impacted
-            carrier = "Opticomm" if "opticomm" in services_val.lower() else "NBN"
+        target_carriers: List[str] = []
+        if has_nbn:
+            target_carriers.append("NBN")
+        if has_opticomm:
+            target_carriers.append("Opticomm")
+        if not target_carriers:
+            target_carriers = ["NBN"]
 
-        status = normalize_status(blk[0])
+        status = normalize_status(f"{sec_type} {blk[0]}")
 
         # Extract individual "NBN CVC: <Suburb/POI>" entries even if multiple appear on one line
         cvc_matches = re.findall(
@@ -706,54 +737,66 @@ def parse_aussie_bb_status(raw_text: str) -> List[Dict[str, Any]]:
         start_dt: Optional[datetime] = None
         end_dt: Optional[datetime] = None
         for i, ln in enumerate(blk):
-            if ln.lower() == "start" and i + 1 < len(blk):
-                start_dt = _parse_abb_month_time(blk[i + 1], now_awst)
-            if ln.lower() == "expected end" and i + 1 < len(blk):
-                end_dt = _parse_abb_month_time(blk[i + 1], now_awst)
+            low_ln = ln.lower()
+            if low_ln.startswith("start"):
+                candidate = re.sub(r"^start[:\s]*", "", ln, flags=re.IGNORECASE).strip() or (blk[i + 1] if i + 1 < len(blk) else "")
+                start_dt = _parse_abb_month_time(candidate, now_awst)
+            if low_ln.startswith("expected end"):
+                candidate = re.sub(r"^expected end[:\s]*", "", ln, flags=re.IGNORECASE).strip() or (blk[i + 1] if i + 1 < len(blk) else "")
+                end_dt = _parse_abb_month_time(candidate, now_awst)
 
+        tz_name, _ = STATE_TIMEZONES.get(state_code, ("Australia/Sydney", "AEDT"))
         # Skip scheduled maintenance windows that have already finished > 1 hour ago
         if end_dt is not None:
-            tz_name, _ = STATE_TIMEZONES.get(state_code, ("Australia/Sydney", "AEDT"))
             end_utc = end_dt.replace(tzinfo=ZoneInfo(tz_name)).astimezone(timezone.utc)
             if end_utc < now_utc - timedelta(hours=1):
                 continue
 
-        start_str = format_12h_local(start_dt.strftime("%Y-%m-%d %H:%M"), state_code) if start_dt else "To Be Confirmed"
-        etr_str = format_12h_local(end_dt.strftime("%Y-%m-%d %H:%M"), state_code) if end_dt else "To Be Confirmed"
+        # Skip maintenance scheduled beyond MAX_UPCOMING_MAINTENANCE_DAYS
+        maint_phase = ""
         sort_ts = 0.0
         if start_dt is not None:
-            tz_name, _ = STATE_TIMEZONES.get(state_code, ("Australia/Sydney", "AEDT"))
-            sort_ts = start_dt.replace(tzinfo=ZoneInfo(tz_name)).timestamp()
+            start_utc = start_dt.replace(tzinfo=ZoneInfo(tz_name)).astimezone(timezone.utc)
+            if start_utc > max_future_utc:
+                continue
+            sort_ts = start_utc.timestamp()
+            if status == "Planned Maintenance":
+                maint_phase = "Upcoming " if start_utc > now_utc else "In-Progress "
 
-        tech_label = "NBN & Opticomm" if (has_opticomm and has_nbn) else ("Opticomm Fibre" if carrier == "Opticomm" else "NBN CVC / POI")
-        poi_summary = ", ".join([f"NBN CVC: {s}" for s in suburbs[:4]]) if cvc_matches else (services_val or "Aussie Broadband CVC")
+        start_str = format_12h_local(start_dt.strftime("%Y-%m-%d %H:%M"), state_code) if start_dt else "To Be Confirmed"
+        etr_str = format_12h_local(end_dt.strftime("%Y-%m-%d %H:%M"), state_code) if end_dt else "To Be Confirmed"
 
-        records.append({
-            "id": f"ABB-{now_awst.strftime('%m%d')}-{idx:02d}",
-            "carrier": carrier,
-            "status": status,
-            "state": state_code,
-            "suburbs": suburbs[:8],
-            "postcodes": list(dict.fromkeys(postcodes)),
-            "technology": tech_label,
-            "poiOrExchange": poi_summary,
-            "cause": f"{blk[0]} ({services_val or carrier}) — Aussie Broadband Network Schedule.",
-            "summary": f"{tech_label} {status.lower()} affecting {', '.join(suburbs[:5])} ({state_code}).",
-            "startTime": start_str,
-            "etr": etr_str,
-            "affectedPremises": 0,
-            "_sortTs": sort_ts,
-            "updates": [{"time": now_str, "note": "Synchronized from Aussie Broadband Live Status Feed."}],
-        })
+        for carrier_item in target_carriers:
+            tech_label = "Opticomm Fibre" if carrier_item == "Opticomm" else "NBN CVC / POI"
+            poi_summary = ", ".join([f"NBN CVC: {s}" for s in suburbs[:4]]) if cvc_matches else (services_val or "Aussie Broadband CVC")
+            suffix = f"-{carrier_item[:3].upper()}" if len(target_carriers) > 1 else ""
+
+            records.append({
+                "id": f"ABB-{now_awst.strftime('%m%d')}-{idx:02d}{suffix}",
+                "carrier": carrier_item,
+                "status": status,
+                "state": state_code,
+                "suburbs": suburbs[:8],
+                "postcodes": list(dict.fromkeys(postcodes)),
+                "technology": tech_label,
+                "poiOrExchange": poi_summary,
+                "cause": f"{maint_phase}{blk[0]} ({services_val or carrier_item}) — Aussie Broadband Network Schedule.",
+                "summary": f"{maint_phase}{carrier_item} {status.lower()} affecting {', '.join(suburbs[:5])} ({state_code}).",
+                "startTime": start_str,
+                "etr": etr_str,
+                "affectedPremises": 0,
+                "_sortTs": sort_ts,
+                "updates": [{"time": now_str, "note": "Synchronized from Aussie Broadband Live & Upcoming Status Feed."}],
+            })
 
     return records
 
 
 def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
     """
-    Parses Launtel's live Outages & Announcements page, grouping each incident
-    heading together with its start time, description, and timestamped updates
-    into a single clean card.
+    Parses Launtel's live Outages & Announcements page, grouping each active
+    outage or upcoming planned maintenance heading together with its start/end
+    times, description, and timestamped updates into a single clean card.
     """
     records: List[Dict[str, Any]] = []
     raw_lines = strip_html_to_lines(html_text)
@@ -761,7 +804,8 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
     now_str = now_awst.strftime("%I:%M %p AWST").lstrip("0")
 
     in_active = False
-    incident_blocks: List[Tuple[str, List[str]]] = []
+    section_kind = "Outage"
+    incident_blocks: List[Tuple[str, str, List[str]]] = []
     current_title: Optional[str] = None
     current_body: List[str] = []
 
@@ -769,12 +813,25 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
         clean_line = re.sub(r"^[#>*\-•\s]+|\*+", "", line).strip()
         low = clean_line.lower()
 
-        if low.startswith("current outages") or low.startswith("upcoming maintenance"):
+        if low.startswith("current outages"):
+            if current_title:
+                incident_blocks.append((section_kind, current_title, current_body))
+                current_title = None
+                current_body = []
             in_active = True
+            section_kind = "Outage"
+            continue
+        if low.startswith("upcoming maintenance") or low.startswith("planned maintenance"):
+            if current_title:
+                incident_blocks.append((section_kind, current_title, current_body))
+                current_title = None
+                current_body = []
+            in_active = True
+            section_kind = "Planned Maintenance"
             continue
         if low.startswith("recent outages") or low.startswith("to view our outage history"):
             if current_title:
-                incident_blocks.append((current_title, current_body))
+                incident_blocks.append((section_kind, current_title, current_body))
                 current_title = None
                 current_body = []
             break
@@ -784,11 +841,11 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
             continue
 
         is_heading = line.lstrip().startswith("#") or (
-            clean_line.startswith("[") and any(k in low for k in ("outage", "maintenance", "degraded"))
+            clean_line.startswith("[") and any(k in low for k in ("outage", "maintenance", "degraded", "planned", "scheduled"))
         )
         if is_heading:
             if current_title:
-                incident_blocks.append((current_title, current_body))
+                incident_blocks.append((section_kind, current_title, current_body))
             current_title = clean_line
             current_body = []
         elif current_title:
@@ -796,13 +853,13 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
 
     # Flush final open incident block if loop reached EOF
     if current_title:
-        incident_blocks.append((current_title, current_body))
+        incident_blocks.append((section_kind, current_title, current_body))
 
-    for idx, (title, body_lines) in enumerate(incident_blocks, start=1):
+    for idx, (sec_kind, title, body_lines) in enumerate(incident_blocks, start=1):
         full_text = f"{title} {' '.join(body_lines)}"
         low = full_text.lower()
         carrier = "Opticomm" if any(k in low for k in ("opticomm", "redtrain", "lbn", "uniti")) else "NBN"
-        status = normalize_status(title)
+        status = "Planned Maintenance" if sec_kind == "Planned Maintenance" else normalize_status(title)
 
         loc_match = re.search(r"-\s*([A-Za-z0-9\s,()]+)$", title)
         suburb_name = loc_match.group(1).strip() if loc_match else title[:60]
@@ -813,20 +870,38 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
         state_code = infer_state("", postcodes, full_text)
 
         start_str = now_str
+        etr_str = "To Be Confirmed"
         since_match = re.search(
-            r"since\s+(?:[A-Za-z]{3}\s+)?(\d{1,2}\s+[A-Za-z]{3})\s+(\d{1,2}:\d{2})\s*([A-Z]{3,4})?",
+            r"(?:since|start date:?)\s+(?:[A-Za-z]+,?\s+)?(\d{1,2}\s+[A-Za-z]{3,9})\s+(\d{1,2}:\d{2}(?:\s*(?:am|pm))?)",
             full_text,
             re.IGNORECASE,
         )
         if since_match:
-            try:
-                parsed_start = datetime.strptime(
-                    f"{since_match.group(1)} {now_awst.year} {since_match.group(2)}",
-                    "%d %b %Y %H:%M",
-                )
-                start_str = format_12h_local(parsed_start.strftime("%Y-%m-%d %H:%M"), state_code)
-            except ValueError:
-                pass
+            date_tok = re.sub(r"\s+", " ", since_match.group(1).strip())
+            time_tok = since_match.group(2).strip()
+            for fmt in ("%d %b %Y %H:%M", "%d %B %Y %H:%M", "%d %b %Y %I:%M %p", "%d %B %Y %I:%M %p"):
+                try:
+                    parsed_start = datetime.strptime(f"{date_tok} {now_awst.year} {time_tok}", fmt)
+                    start_str = format_12h_local(parsed_start.strftime("%Y-%m-%d %H:%M"), state_code)
+                    break
+                except ValueError:
+                    continue
+
+        end_match = re.search(
+            r"(?:end date:?|until)\s+(?:[A-Za-z]+,?\s+)?(\d{1,2}\s+[A-Za-z]{3,9})\s+(\d{1,2}:\d{2}(?:\s*(?:am|pm))?)",
+            full_text,
+            re.IGNORECASE,
+        )
+        if end_match:
+            date_tok = re.sub(r"\s+", " ", end_match.group(1).strip())
+            time_tok = end_match.group(2).strip()
+            for fmt in ("%d %b %Y %H:%M", "%d %B %Y %H:%M", "%d %b %Y %I:%M %p", "%d %B %Y %I:%M %p"):
+                try:
+                    parsed_end = datetime.strptime(f"{date_tok} {now_awst.year} {time_tok}", fmt)
+                    etr_str = format_12h_local(parsed_end.strftime("%Y-%m-%d %H:%M"), state_code)
+                    break
+                except ValueError:
+                    continue
 
         updates_list: List[Dict[str, str]] = []
         summary_text = title
@@ -862,7 +937,7 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
             "cause": title,
             "summary": summary_text,
             "startTime": start_str,
-            "etr": "To Be Confirmed",
+            "etr": etr_str,
             "affectedPremises": 0,
             "_sortTs": now_awst.timestamp(),
             "updates": updates_list,
@@ -874,7 +949,7 @@ def parse_launtel_status(html_text: str) -> List[Dict[str, Any]]:
 def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str, Any]]:
     """
     Parses Atlassian Statuspage /api/v2/summary.json feeds (Superloop, Swoop, Exetel)
-    for active NBN & Opticomm incidents and scheduled maintenances.
+    for active NBN & Opticomm incidents as well as current and upcoming scheduled maintenances.
     """
     records: List[Dict[str, Any]] = []
     try:
@@ -882,7 +957,8 @@ def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str
     except Exception:
         return records
 
-    now_str = datetime.now(ZoneInfo("Australia/Perth")).strftime("%I:%M %p AWST").lstrip("0")
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.astimezone(ZoneInfo("Australia/Perth")).strftime("%I:%M %p AWST").lstrip("0")
     all_events: List[Tuple[str, Dict[str, Any]]] = []
     for inc in payload.get("incidents", []) or []:
         all_events.append(("incident", inc))
@@ -899,7 +975,7 @@ def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str
         full_text = f"{name} {comp_str} {latest_body}"
         combined = full_text.lower()
 
-        if not any(k in combined for k in ("nbn", "opticomm", "poi", "cvc", "fibre", "fttp", "fttn", "hfc", "outage", "maintenance")):
+        if not any(k in combined for k in ("nbn", "opticomm", "poi", "cvc", "fibre", "fttp", "fttn", "hfc", "outage", "maintenance", "scheduled")):
             continue
 
         carrier = "Opticomm" if "opticomm" in combined else "NBN"
@@ -913,6 +989,14 @@ def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str
         start_raw = str(ev.get("scheduled_for") or ev.get("started_at") or ev.get("created_at") or "")
         end_raw = str(ev.get("scheduled_until") or "")
         start_dt_utc = parse_timestamp_utc(start_raw, state_code)
+
+        maint_phase = ""
+        if status == "Planned Maintenance":
+            ev_stat = str(ev.get("status") or "").lower()
+            if ev_stat in ("in_progress", "verifying") or (start_dt_utc and start_dt_utc <= now_utc):
+                maint_phase = "In-Progress "
+            else:
+                maint_phase = "Upcoming "
 
         formatted_updates = []
         for u in updates_list[:4]:
@@ -933,8 +1017,8 @@ def parse_statuspage_summary(rsp_name: str, raw_json_text: str) -> List[Dict[str
             "postcodes": list(dict.fromkeys(postcodes)) or ["RSP-API"],
             "technology": "Opticomm Fibre" if carrier == "Opticomm" else "NBN Multi-Tech",
             "poiOrExchange": comp_str or f"{rsp_name} Status Feed",
-            "cause": name,
-            "summary": latest_body[:260] if latest_body else name,
+            "cause": f"{maint_phase}{name}",
+            "summary": latest_body[:260] if latest_body else f"{maint_phase}{name}",
             "startTime": format_12h_local(start_raw, state_code) if start_raw else now_str,
             "etr": format_12h_local(end_raw, state_code) if end_raw else "To Be Confirmed",
             "affectedPremises": 0,
